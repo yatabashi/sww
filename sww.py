@@ -9,14 +9,6 @@ from typing import Type, Union
 import copy
 import random
 
-import warnings
-warnings.simplefilter("always", DeprecationWarning)
-def deprecated(f):
-    def warner(*args, **kwargs):
-        warnings.warn("Adjacency matrices don't preserve links to deleted pages; Avoid using them.", DeprecationWarning)
-        f(*args, **kwargs)
-    return warner
-
 # Webページに相当する
 class Page:
     def __init__(self, id: int, content: str, destinationIds: set[int]):
@@ -51,32 +43,6 @@ class Server:
         for id in ids:
             self.record.pop(id, None)
 
-    # 行列からページの一覧を取得する
-    @deprecated
-    @classmethod
-    def getPagesFromMatrix(cls, matrix: list[list[int]]):
-        # 行列が正しい形であるかを確認する
-        pageIds = matrix.pop(-1)
-        noDuplicationInHeader = len(pageIds) == len(set(pageIds))
-        height = len(matrix)
-        isSquare = all([len(row) == height for row in matrix])
-        if not (noDuplicationInHeader and isSquare):
-            raise ValueError
-
-        # ハイパーリンクを取得し、一度辞書に格納する
-        d = {pageId: Page(pageId, "", set()) for pageId in pageIds}
-
-        for i in range(len(matrix)):
-            for j in range(len(matrix[i])):
-                if matrix[i][j] == 0:
-                    pass
-                elif matrix[i][j] == 1:
-                    d[pageIds[i]].destinationIds.add(pageIds[j])
-                else:
-                    raise ValueError
-                
-        return d.values()
-    
     # ハイパーリンクの集合からページの一覧を取得する
     @classmethod
     def getPagesFromHyperlinks(cls, hyperlinks: set[tuple[int, int]]):
@@ -160,50 +126,6 @@ class Web:
     # ハイパーテキストの構造をソートして返す
     def getSortedHypertext(self) -> dict[int, set[int]]:
         return dict(sorted(self.hypertext.items(), key=(lambda x: x[0])))
-
-    # ハイパーテキストの構造を行列形式で返す
-    # 削除されたページへのリンクは無視される
-    @deprecated
-    def getHypertextInMatrix(self) -> list[list[int]]:
-        l = []
-
-        # ハイパーテキスト内のページを取得する
-        pageIds = sorted(self.hypertext.keys())
-
-        # 各2ページ間にリンクがあるかを記録する
-        for start in pageIds:
-            l.append([1 if end in self.hypertext[start] else 0 for end in pageIds])
-        
-        # ページ一覧を付加する
-        l.append(pageIds)
-
-        return l
-    
-    # 行列からハイパーテキストの構造を取得する
-    @deprecated
-    @classmethod
-    def getHypertextFromMatrix(cls, matrix: list[list[int]]):
-        # 行列が正しい形であるかを確認する
-        pageIds = matrix.pop(-1)
-        noDuplicationInHeader = len(pageIds) == len(set(pageIds))
-        height = len(matrix)
-        isSquare = all([len(row) == height for row in matrix])
-        if not (noDuplicationInHeader and isSquare):
-            raise ValueError
-
-        # 行列を辞書に変換する
-        d = {pageId: set() for pageId in pageIds}
-
-        for i in range(len(matrix)):
-            for j in range(len(matrix[i])):
-                if matrix[i][j] == 0:
-                    pass
-                elif matrix[i][j] == 1:
-                    d[pageIds[i]].add(pageIds[j])
-                else:
-                    raise ValueError
-                
-        return d
 
     # ハイパーテキスト内の全リンクを返す
     def getHyperlinks(self) -> set[tuple[int, int]]:
