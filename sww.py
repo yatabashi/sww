@@ -1,23 +1,24 @@
 """
-makeRandomPages ← 一旦無視？
-
-強連結にする
-
 強連結成分分解の非再帰化
     https://qiita.com/KowerKoint/items/870ea9ef7a39f3fe4ce3
-
-Page をサーバー内に保管しておく？
-    cf. Web.getHypertextFromHyperlinks
-
-ランダムなグラフの生成→数字の重複を避けるために Page の保存の処置の後
-    あたらしく server を作成するなら関係ないのでは？
 """
 """
 強連結成分分解：
     https://manabitimes.jp/math/1250
     https://hkawabata.github.io/technical-note/note/Algorithm/graph/scc.html
+"""
 
 """
+ハイパーテキストは、ページをノードと、リンクをエッジとして、ループ付きの有向グラフと見做すことができる。
+ここでは、単一のサーバにアップロードされ、ハイパーリンクで結ばれた（あるいは結ばれていない）ページ群を考える。
+
+なお、ページ A からページ B とページ C にリンクが飛んでいるが、
+ページ B は削除されており、ページ C はどこにもリンクしていないという状態を考えると、
+ページ B からのハイパーリンクは未定義であり、ページ C からのハイパーリンクは None であるという違いがあり、
+Web.hypertext はこれを区別する。
+しかし、グラフとして見たときにはこの違いは捨象される。
+"""
+
 
 from typing import Type, Union
 import copy
@@ -33,17 +34,18 @@ class Page:
     # ページにハイパーリンクを追加する
     def addLink(self, *destinationIds: int):
         self.destinationIds.update(set(destinationIds))
-
+    
     # ページから指定したハイパーリンクを削除する
     def deleteLink(self, *destinationIds: int):
         for id in destinationIds:
             self.destinationIds.discard(id)
 
-# （DNS+）サーバに相当する
+# サーバに相当する
+# ページを id を鍵とした辞書の形で保持する
 class Server:
     def __init__(self, pages: set[Type[Page]] = {}):
         self.record: dict[int, Type[Page]] = {page.id: page for page in pages}
-
+    
     # 指定の id を持つページを返す
     def getPage(self, id: int) -> Union[Page, None]:
         return self.record.get(id)
@@ -56,13 +58,12 @@ class Server:
     def deletePage(self, *ids: int):
         for id in ids:
             self.record.pop(id, None)
-
-    # ハイパーリンクの集合からページの一覧を取得する
+    
+    # ハイパーリンクの集合をハイパーテキストに変換する
     @classmethod
-    def getPagesFromHyperlinks(cls, hyperlinks: set[tuple[int, int]]):
-        # 行列を辞書に変換する
-        d: dict[int, Page] = {}
-
+    def makePagesFromHyperlinks(cls, hyperlinks: set[tuple[int, int]]):
+        d: dict[int, Page] = dict()
+        
         for hyperlink in hyperlinks:
             if hyperlink[0] in d:
                 d[hyperlink[0]].destinationIds.add(hyperlink[1])
@@ -71,17 +72,17 @@ class Server:
                 
         return d.values()
 
-
 # WWW に相当するハイパーテキスト
+# 特定のサーバ内で、あるページを起点にクローリングを行いハイパーテキストを構築する
 class Web:
     def __init__(self, server: Server, initialPageId: int):
         self.server: Server = server  # ハイパーテキストを構築するページ群が置かれたサーバ
         self.initialPageId = initialPageId  # 既知として与えられる周回の起点となるページ
         self.hypertext: dict[int, set[int]] = dict() # ハイパーテキストを隣接リストとして保持する
-        self.reconstruct(initialPageId)
-
+        self.initialise(initialPageId)
+    
     # ハイパーテキストを構築する
-    def initialise(self, locationId: int):
+    def construct(self, locationId: int):
         # ページが周回済みだった場合
         if locationId in self.hypertext:
             return
@@ -96,14 +97,14 @@ class Web:
 
         # リンク先の各ページを起点にハイパーテキストを構築する
         for i in location.destinationIds:
-            self.initialise(i)
+            self.construct(i)
     
     # ハイパーテキストを初期化して構築する
-    def reconstruct(self, initialPageId: int):
+    def initialise(self, initialPageId: int):
         self.initialPageId = initialPageId
         self.hypertext.clear()
-        self.initialise(initialPageId)
-
+        self.construct(initialPageId)
+    
     # ハイパーテキストを更新する
     def crawl(self):
         gonePageIds = set()
@@ -132,7 +133,7 @@ class Web:
 
         # 新たに現れたページを起点にハイパーテキストを構築する
         for id in appearedPageIds:
-            self.initialise(id)
+            self.construct(id)
     
     # ハイパーテキストの構造を返す
     def getHypertext(self) -> dict[int, set[int]]:
@@ -141,7 +142,7 @@ class Web:
     # ハイパーテキストの構造をソートして返す
     def getSortedHypertext(self) -> dict[int, set[int]]:
         return dict(sorted(self.hypertext.items(), key=(lambda x: x[0])))
-
+    
     # ハイパーテキスト内の全リンクを返す
     def getHyperlinks(self) -> set[tuple[int, int]]:
         s = set()
@@ -156,13 +157,11 @@ class Web:
     def getSortedHyperlinks(self) -> set[tuple[int, int]]:
         return sorted(list(self.getHyperlinks()))
     
-    # ハイパーリンクの集合からハイパーテキストの構造を取得する
-    # 新たに Page を生成している←もとの Server 内に Page があるならそれを利用すべき？
-    # content が消える問題もある
+    # ハイパーリンクの集合をハイパーテキストに変換する（サーバとは独立）
+    # 新たに Page を生成する
     @classmethod
     def makeHypertextFromHyperlinks(cls, hyperlinks: set[tuple[int, int]]):
-        # 行列を辞書に変換する
-        d: dict[int, set[int]] = {}
+        d: dict[int, set[int]] = dict()
 
         for hyperlink in hyperlinks:
             if hyperlink[0] in d:
@@ -171,7 +170,7 @@ class Web:
                 d[hyperlink[0]] = {hyperlink[1]}
                 
         return d
-
+    
     # ハイパーリンクを辿って目的のページに辿り着くことを目指すゲーム
     def explore(self, treasure: int = None):
         # 与えられた str が int 形式に変換可能かを返す
@@ -267,7 +266,7 @@ class Web:
         hypertext = self.getHypertext()
         ## ラベリング関数の定義
         ## 削除されたページもラベリングされる
-        def label(n: int = 0, pageIdToLabel: dict[int, int] = {}, visitedPageIds: set[int] = set()):
+        def label(n: int = 0, pageIdToLabel: dict[int, int] = dict(), visitedPageIds: set[int] = set()):
             # 片道のラベリング関数の定義
             # 始点に戻ってきたら終了し、未周回のページを残しうる
             def label_oneway(locationId: int, n: int = 0) -> int:
@@ -391,7 +390,7 @@ if __name__ == "__main__":
       ↖︎ ↓ ↗︎ ↑
         7  (g)
     """
-
+    
     page0 = Page(0, "a", {1, 2})
     page1 = Page(1, "b", {2, 3})
     page2 = Page(2, "c", {0})
@@ -410,9 +409,7 @@ if __name__ == "__main__":
     print("hypertext:", web.getSortedHypertext())
     print(web.isStronglyConnected(), "SCCs")
     print("\n——————————\n")
-
-    # web.tp(); 
-
+    
     """
        ~a~  i ← k
         ↑     ↘︎ ↑
@@ -423,7 +420,7 @@ if __name__ == "__main__":
         h → g
             ↑
            (n)
-
+    
        ~0~  11← 8
         ↑     ↖︎ ↑
     7 → 1       10→ 9
@@ -434,7 +431,7 @@ if __name__ == "__main__":
             ↑
            (n)
     """
-
+    
     server.deletePage(0)
     page5.deleteLink(12)
     page7.addLink(6)
@@ -444,7 +441,7 @@ if __name__ == "__main__":
     print("hypertext:", web.getSortedHypertext())
     print(web.isStronglyConnected(), "SCCs")
     print("\n——————————\n")
-
+    
     """
        ~0~
         ↑
@@ -455,7 +452,7 @@ if __name__ == "__main__":
         7 → 6
             ↑
             13⇦
-
+    
        ~0~
         ↑
         1
@@ -467,16 +464,16 @@ if __name__ == "__main__":
             7 ⇦
     """
     
-    web.reconstruct(13)
+    web.initialise(13)
     print("hypertext:", web.getSortedHypertext())
     print(web.isStronglyConnected(), "SCCs")
     print("\n——————————\n")
-
+    
     # web.explore()
-
+    
     # for _ in range(5):
     #     web.randomwalk(9, 3, 9)
-
+    
     """
     0 → 1 → 2 → 4
         ↑ ↙︎
@@ -492,5 +489,3 @@ if __name__ == "__main__":
     print("hypertext:", weba.getSortedHypertext())
     print(web.isStronglyConnected(), "SCCs")
     print("\n——————————\n")
-
-    
