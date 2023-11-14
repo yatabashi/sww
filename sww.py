@@ -1,13 +1,62 @@
 """
 強連結成分分解の非再帰化
     https://qiita.com/KowerKoint/items/870ea9ef7a39f3fe4ce3
+
+2ページを与え縮約したグラフを返す: O(1)
+2ページを与え距離を取得する
+    幅優先探索、ダイクストラ法
+    https://en.wikipedia.org/wiki/Distance_(graph_theory)
+    https://www.momoyama-usagi.com/entry/math-risan14
+    https://qiita.com/zk_phi/items/d93f670544e4b9816ed0
+    https://ja.wikipedia.org/wiki/%E3%83%80%E3%82%A4%E3%82%AF%E3%82%B9%E3%83%88%E3%83%A9%E6%B3%95
+    https://dai1741.github.io/maximum-algo-2012/docs/shortest-path/
+直径を取得する: O(n)
+    https://take44444.github.io/Algorithm-Book/graph/tree/diameter/main.html
+    https://algo-logic.info/tree-diameter/
+ページを与え、それを削除し、それへのリンクも削除する: O(1)
+    Server.deletePage() はリンクを削除しない
+ページを与え、次数（出入それぞれ）を取得する: O(n)
+    https://ja.wikipedia.org/wiki/%E6%AC%A1%E6%95%B0_(%E3%82%B0%E3%83%A9%E3%83%95%E7%90%86%E8%AB%96)
+出/入次数0の孤立点を取得する: O(n)
+    削除されたページをどう扱うか？
+ページを与え、そこから到達可能なページを取得する
+    探索するだけ
+道の集合を与え、ハイパーテキストを生成する
+    Server.makePagesFromHyperlinks() はエッジの集合を与える
+    歩道Walk／路Trail（辺の重複なし）を与えたい
+        walk から trail に変換することになりそう
+        →これは別で用意したいか
+    道Pathは頂点が重複しない→採用するならループは独立の要素としてあたえられなければならない
+強連結度
+サイクル検出
+    finished でないが visited ならサイクルがある
+    単に visitied だけ見た場合？
+    https://drken1215.hatenablog.com/entry/2023/05/20/200517
+   
+ファイルシステム
 """
 """
 強連結成分分解：
     https://manabitimes.jp/math/1250
     https://hkawabata.github.io/technical-note/note/Algorithm/graph/scc.html
 """
-
+"""
+データ構造を考えよう
+Page ←いる
+Server:
+    Pageを保持する
+    Pageの間にWebが構築される
+        どこから見始めるかによって異なりうるが、基本ServerとWebは1:1対応
+        →統合できる
+        今は
+            Server: record
+            Web: server, initialPage, hypertext
+        これを
+            Server: record, hypertext, initialPage
+        とする。
+        initialPage は Server が本来持つべきデータではないが、 hypertext の構築上必要なので仕方なし
+            全てのページに到達可能なページが存在するか、存在するならそれは何かを取得する関数、ひいてはそれをinit-に設定する関数が可能
+"""
 """
 ハイパーテキストは、ページをノードと、リンクをエッジとして、ループ付きの有向グラフと見做すことができる。
 ここでは、単一のサーバにアップロードされ、ハイパーリンクで結ばれた（あるいは結ばれていない）ページ群を考える。
@@ -23,6 +72,11 @@ Web.hypertext はこれを区別する。
 from typing import Type, Union
 import copy
 import random
+
+# set から要素を一つ取り出す関数
+def getMember(s: set) -> any:
+    for m in s:
+        return m
 
 # Webページに相当する
 class Page:
@@ -73,14 +127,15 @@ class Server:
         return d.values()
 
 # WWW に相当するハイパーテキスト
-# 特定のサーバ内で、あるページを起点にクローリングを行いハイパーテキストを構築する
+# 特定のサーバに依存して、あるページを起点にクローリングを行いハイパーテキストを構築する
 class Web:
-    def __init__(self, server: Server, initialPageId: int):
+    def __init__(self, server: Server, initialPageId: int = None):
         self.server: Server = server  # ハイパーテキストを構築するページ群が置かれたサーバ
-        self.initialPageId = initialPageId  # 既知として与えられる周回の起点となるページ
+        self.initialPageId = initialPageId if initialPageId else getMember(server.record.keys())  # 既知として与えられる周回の起点となるページ
         self.hypertext: dict[int, set[int]] = dict() # ハイパーテキストを隣接リストとして保持する
-        self.initialise(initialPageId)
+        self.initialise(self.initialPageId)
     
+    # ———ハイパーテキストの構築
     # ハイパーテキストを構築する
     def construct(self, locationId: int):
         # ページが周回済みだった場合
@@ -101,7 +156,7 @@ class Web:
     
     # ハイパーテキストを初期化して構築する
     def initialise(self, initialPageId: int):
-        self.initialPageId = initialPageId
+        self.changeInitialPage(initialPageId)
         self.hypertext.clear()
         self.construct(initialPageId)
     
@@ -135,6 +190,28 @@ class Web:
         for id in appearedPageIds:
             self.construct(id)
     
+    # ハイパーテキストの構築起点を変更する
+    def changeInitialPage(self, id: int):
+        if id in self.server.record.keys():
+            self.initialPageId = id
+        else:
+            raise ValueError
+    
+    # ハイパーリンクの集合をハイパーテキストに変換する（サーバとは独立）
+    # 新たに Page を生成する
+    @classmethod
+    def makeHypertextFromHyperlinks(cls, hyperlinks: set[tuple[int, int]]):
+        d: dict[int, set[int]] = dict()
+
+        for hyperlink in hyperlinks:
+            if hyperlink[0] in d:
+                d[hyperlink[0]].add(hyperlink[1])
+            else:
+                d[hyperlink[0]] = {hyperlink[1]}
+                
+        return d
+    
+    # ———ハイパーテキストからの情報取得
     # ハイパーテキストの構造を返す
     def getHypertext(self) -> dict[int, set[int]]:
         return self.hypertext
@@ -157,111 +234,11 @@ class Web:
     def getSortedHyperlinks(self) -> set[tuple[int, int]]:
         return sorted(list(self.getHyperlinks()))
     
-    # ハイパーリンクの集合をハイパーテキストに変換する（サーバとは独立）
-    # 新たに Page を生成する
-    @classmethod
-    def makeHypertextFromHyperlinks(cls, hyperlinks: set[tuple[int, int]]):
-        d: dict[int, set[int]] = dict()
-
-        for hyperlink in hyperlinks:
-            if hyperlink[0] in d:
-                d[hyperlink[0]].add(hyperlink[1])
-            else:
-                d[hyperlink[0]] = {hyperlink[1]}
-                
-        return d
-    
-    # ハイパーリンクを辿って目的のページに辿り着くことを目指すゲーム
-    def explore(self, treasure: int = None):
-        # 与えられた str が int 形式に変換可能かを返す
-        def isint(i: str):
-            try:
-                int(i)
-            except:
-                return False
-            else:
-                return True
-
-        # ハイパーリンクを辿る
-        def proceed(locationId: int, path: list[str] = []):
-            # 現在地が目的地だった場合
-            if locationId == treasure:
-                print("→".join(path)+("→" if path else "")+str(locationId))
-                print(f"You reached page {treasure}!")
-            # 現在地に相当するページが存在しなかった場合
-            elif self.server.getPage(locationId) is None:
-                print(f"Page {locationId} is gone!")
-                proceed(int(path[-1]), path[:-1])
-            # 現在地が目的地以外のページだった場合
-            else:
-                print("→".join(path)+("→" if path else "")+str(locationId)+"→"+str(self.server.getPage(locationId).destinationIds))
-                v = input(f"Go to: ")
-                
-                # 入力値が"quit"だった場合
-                if v == "quit":
-                    return 1
-                # 入力値が"back"だった場合
-                elif v == "back":
-                    if path == []:
-                        print("Can't go back. If you want to end the game, type \'quit\'.")
-                        if proceed(locationId, path): return 1
-                    else:
-                        if proceed(int(path[-1]), path[:-1]): return 1
-                # 入力値が整数として解釈できなかった場合
-                elif not isint(v):
-                    print(f"Invalid input")
-                    if proceed(locationId, path): return 1
-                # 入力値が整数として解釈される場合
-                else:
-                    destination = int(v)
-
-                    # 入力されたページに現在地からアクセスできない場合
-                    if destination not in self.server.getPage(locationId).destinationIds:
-                        print(f"Can't move to {v}")
-                        if proceed(locationId, path): return 1
-                    # 入力されたページに現在地からアクセスできる場合
-                    else:
-                        if proceed(destination, path+[str(locationId)]): return 1
-
-        # 目的地が与えられていない場合はランダムに決定する
-        # 到達不能なページも候補にある
-        # reconstruct するべきか？
-        if treasure is None:
-            treasure = random.choice(list(self.hypertext.keys() - {self.initialPageId}))
-        
-        print(f"Search for page {treasure}!")
-        proceed(self.initialPageId)
-    
-    # リンクをランダムに選択して移動していくロボット
-    def randomwalk(self, locationId: int = None, destinationId: int = None, maxStep: int = None, path: list[str] = []):
-        if locationId is None: locationId = self.initialPageId
-
-        print(("→" if path else "")+str(locationId), end="")
-        # 現在地が目的地だった場合
-        if locationId == destinationId:
-            print(".")
-            return
-        # 歩数の上限に達した場合
-        elif maxStep is not None and maxStep < 1:
-            print("]")
-            return
-        # 現在地に相当するページが存在しなかった場合
-        elif self.server.getPage(locationId) is None:
-            print("/")
-            return
-        # 現在地が目的地以外のページだった場合
-        else:
-            choices = self.server.getPage(locationId).destinationIds
-            self.randomwalk(random.choice(list(choices)), destinationId, (None if maxStep is None else maxStep-1), path+[str(locationId)])
-    
+    # ———グラフ理論的な操作
     # ハイパーテキストを強連結成分（Strongly Connected Components）分解する
     # 有向グラフの強連結成分とは、その部分木であって任意の2頂点間に双方向に有向路がある（＝強連結である）ものを言う
     # Kosaraju のアルゴリズムに相当する
     def getSCCs(self, printsDetails: bool = False) -> set[set[int]]:
-        def getMember(s: set) -> any:
-            for m in s:
-                return m
-        
         # ページをラベリングする
         hypertext = self.getHypertext()
         ## ラベリング関数の定義
@@ -365,9 +342,94 @@ class Web:
                 return foundComponents
             
         return getComponents()
-
+    
+    # 強結合成分の個数を取得する
     def isStronglyConnected(self):
         return len(self.getSCCs())
+    
+    # ———その他
+    # ハイパーリンクを辿って目的のページに辿り着くことを目指すゲーム
+    def explore(self, treasure: int = None):
+        # 与えられた str が int 形式に変換可能かを返す
+        def isint(i: str):
+            try:
+                int(i)
+            except:
+                return False
+            else:
+                return True
+
+        # ハイパーリンクを辿る
+        def proceed(locationId: int, walk: list[str] = []):
+            # 現在地が目的地だった場合
+            if locationId == treasure:
+                print("→".join(walk)+("→" if walk else "")+str(locationId))
+                print(f"You reached page {treasure}!")
+            # 現在地に相当するページが存在しなかった場合
+            elif self.server.getPage(locationId) is None:
+                print(f"Page {locationId} is gone!")
+                proceed(int(walk[-1]), walk[:-1])
+            # 現在地が目的地以外のページだった場合
+            else:
+                print("→".join(walk)+("→" if walk else "")+str(locationId)+"→"+str(self.server.getPage(locationId).destinationIds))
+                v = input(f"Go to: ")
+                
+                # 入力値が"quit"だった場合
+                if v == "quit":
+                    return 1
+                # 入力値が"back"だった場合
+                elif v == "back":
+                    if walk == []:
+                        print("Can't go back. If you want to end the game, type \'quit\'.")
+                        if proceed(locationId, walk): return 1
+                    else:
+                        if proceed(int(walk[-1]), walk[:-1]): return 1
+                # 入力値が整数として解釈できなかった場合
+                elif not isint(v):
+                    print(f"Invalid input")
+                    if proceed(locationId, walk): return 1
+                # 入力値が整数として解釈される場合
+                else:
+                    destination = int(v)
+
+                    # 入力されたページに現在地からアクセスできない場合
+                    if destination not in self.server.getPage(locationId).destinationIds:
+                        print(f"Can't move to {v}")
+                        if proceed(locationId, walk): return 1
+                    # 入力されたページに現在地からアクセスできる場合
+                    else:
+                        if proceed(destination, walk+[str(locationId)]): return 1
+
+        # 目的地が与えられていない場合はランダムに決定する
+        # 到達不能なページも候補にある
+        # reconstruct するべきか？
+        if treasure is None:
+            treasure = random.choice(list(self.hypertext.keys() - {self.initialPageId}))
+        
+        print(f"Search for page {treasure}!")
+        proceed(self.initialPageId)
+    
+    # リンクをランダムに選択して移動していくロボット
+    def randomwalk(self, locationId: int = None, destinationId: int = None, maxStep: int = None, walk: list[str] = []):
+        if locationId is None: locationId = self.initialPageId
+
+        print(("→" if walk else "")+str(locationId), end="")
+        # 現在地が目的地だった場合
+        if locationId == destinationId:
+            print(".")
+            return
+        # 歩数の上限に達した場合
+        elif maxStep is not None and maxStep < 1:
+            print("]")
+            return
+        # 現在地に相当するページが存在しなかった場合
+        elif self.server.getPage(locationId) is None:
+            print("/")
+            return
+        # 現在地が目的地以外のページだった場合
+        else:
+            choices = self.server.getPage(locationId).destinationIds
+            self.randomwalk(random.choice(list(choices)), destinationId, (None if maxStep is None else maxStep-1), walk+[str(locationId)])
 
 
 
