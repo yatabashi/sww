@@ -98,7 +98,6 @@ class Server:
     # ———ハイパーテキストの構築
     # ハイパーテキストを構築する
     def constructHypertext(self, locationId: int):
-        print(locationId, self.hypertext)
         # ページが周回済みだった場合
         if locationId in self.hypertext:
             return
@@ -161,7 +160,7 @@ class Server:
     
     # ハイパーリンクの集合を元にページ群を（新たに）生成する
     @classmethod
-    def makePagesFromHyperlinks(cls, hyperlinks: set[tuple[int, int]]):
+    def makePagesFromHyperlinks(cls, hyperlinks: set[tuple[int, int]]) -> set[Type[Page]]:
         d: dict[int, Page] = dict()
         
         for hyperlink in hyperlinks:
@@ -174,7 +173,7 @@ class Server:
     
     # ハイパーリンクの集合からハイパーテキストを生成する
     @classmethod
-    def makeHypertextFromHyperlinks(cls, hyperlinks: set[tuple[int, int]]):
+    def makeHypertextFromHyperlinks(cls, hyperlinks: set[tuple[int, int]]) -> dict[int, set[int]]:
         d: dict[int, set[int]] = dict()
 
         for hyperlink in hyperlinks:
@@ -212,12 +211,12 @@ class Server:
     # ハイパーテキストを強連結成分（Strongly Connected Components）分解する
     # 有向グラフの強連結成分とは、その部分木であって任意の2頂点間に双方向に有向路がある（＝強連結である）ものを言う
     # Kosaraju のアルゴリズムに相当する
-    def getSCCs(self, printsDetails: bool = False) -> set[set[int]]:
+    def getSCCs(self, printsDetails: bool = False) -> set[frozenset[int]]:
         # ページをラベリングする
         hypertext = self.getHypertext()
         ## ラベリング関数の定義
         ## 削除されたページもラベリングされる
-        def label(n: int = 0, pageIdToLabel: dict[int, int] = dict(), visitedPageIds: set[int] = set()):
+        def label(n: int = 0, pageIdToLabel: dict[int, int] = dict(), visitedPageIds: set[int] = set()) -> dict[int, int]:
             # 片道のラベリング関数の定義
             # 始点に戻ってきたら終了し、未周回のページを残しうる
             def label_oneway(locationId: int, n: int = 0) -> int:
@@ -257,7 +256,7 @@ class Server:
 
         # ハイパーテキストの転置グラフ*を取得する
         # *すべてのエッジ（リンク）を反転させたものを言う
-        def getTransposeHypertext():
+        def getTransposeHypertext() -> dict[int, set[int]]:
             hyperlinks = self.getHyperlinks()
             transpose = {hyperlink[::-1] for hyperlink in hyperlinks}
             return Server.makeHypertextFromHyperlinks(transpose)
@@ -318,14 +317,14 @@ class Server:
         return getComponents()
     
     # 強結合成分の個数を取得する
-    def hypertextIsStronglyConnected(self):
+    def hypertextIsStronglyConnected(self) -> int:
         return len(self.getSCCs())
     
     # ———その他
     # ハイパーリンクを辿って目的のページに辿り着くことを目指すゲーム
     def explore(self, treasure: int = None):
         # 与えられた str が int 形式に変換可能かを返す
-        def isint(i: str):
+        def isint(i: str) -> bool:
             try:
                 int(i)
             except:
@@ -334,11 +333,12 @@ class Server:
                 return True
 
         # ハイパーリンクを辿る
-        def proceed(locationId: int, walk: list[str] = []):
+        def proceed(locationId: int, walk: list[str] = []) -> int:
             # 現在地が目的地だった場合
             if locationId == treasure:
                 print("→".join(walk)+("→" if walk else "")+str(locationId))
                 print(f"You reached page {treasure}!")
+                return 0
             # 現在地に相当するページが存在しなかった場合
             elif self.getPage(locationId) is None:
                 print(f"Page {locationId} is gone!")
@@ -447,15 +447,15 @@ if __name__ == "__main__":
     print("\n——————————\n")
     
     """
-       ~a~  i ← k
+       ~0~  8 ← 10
         ↑     ↘︎ ↑
-    b → c       j → l
+    1 → 2       9 → 11
     ↓ ↗︎ ↑   ∩   ↑
-    d → e ← f ← m
+    3 → 4 ← 5 ← 12
       ↖︎ ↓ ↗︎ ↑
-        h → g
+        7 → 6
             ↑
-           (n)
+           (13)
     
        ~0~  11← 8
         ↑     ↖︎ ↑
