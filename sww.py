@@ -32,6 +32,8 @@
     finished でないが visited ならサイクルがある
     単に visitied だけ見た場合？
     https://drken1215.hatenablog.com/entry/2023/05/20/200517
+
+全てのページに到達可能なページが存在するか、存在するならそれは何かを取得する関数、ひいてはそれをinit-に設定する関数が可能
    
 ファイルシステム
 """
@@ -39,23 +41,6 @@
 強連結成分分解：
     https://manabitimes.jp/math/1250
     https://hkawabata.github.io/technical-note/note/Algorithm/graph/scc.html
-"""
-"""
-データ構造を考えよう
-Page ←いる
-Server:
-    Pageを保持する
-    Pageの間にWebが構築される
-        どこから見始めるかによって異なりうるが、基本ServerとWebは1:1対応
-        →統合できる
-        今は
-            Server: record
-            Web: server, initialPage, hypertext
-        これを
-            Server: record, hypertext, initialPage
-        とする。
-        initialPage は Server が本来持つべきデータではないが、 hypertext の構築上必要なので仕方なし
-            全てのページに到達可能なページが存在するか、存在するならそれは何かを取得する関数、ひいてはそれをinit-に設定する関数が可能
 """
 """
 ハイパーテキストは、ページをノードと、リンクをエッジとして、ループ付きの有向グラフと見做すことができる。
@@ -95,10 +80,12 @@ class Page:
             self.destinationIds.discard(id)
 
 # サーバに相当する
-# ページを id を鍵とした辞書の形で保持する
+# ページを id を鍵とした辞書の形で保持し、それらを元にハイパーテキストを構築する
 class Server:
-    def __init__(self, pages: set[Type[Page]] = {}):
-        self.record: dict[int, Type[Page]] = {page.id: page for page in pages}
+    def __init__(self, pages: set[Type[Page]] = {}, initialPageId: int = None):
+        self.record: dict[int, Type[Page]] = {page.id: page for page in pages}  # ページIDとページを対応付ける
+        self.hypertext: dict[int, set[int]] = dict()  # ハイパーテキストを隣接リストとして保持する
+        self.initialPageId: int = initialPageId if initialPageId else getMember(self.record.keys())  # クローリング周回の起点となるページ
     
     # 指定の id を持つページを返す
     def getPage(self, id: int) -> Union[Page, None]:
@@ -125,25 +112,24 @@ class Server:
                 d[hyperlink[0]] = Page(hyperlink[0], "", {hyperlink[1]})
                 
         return d.values()
-
-# WWW に相当するハイパーテキスト
-# 特定のサーバに依存して、あるページを起点にクローリングを行いハイパーテキストを構築する
-class Web:
-    def __init__(self, server: Server, initialPageId: int = None):
-        self.server: Server = server  # ハイパーテキストを構築するページ群が置かれたサーバ
-        self.initialPageId = initialPageId if initialPageId else getMember(server.record.keys())  # 既知として与えられる周回の起点となるページ
-        self.hypertext: dict[int, set[int]] = dict() # ハイパーテキストを隣接リストとして保持する
-        self.initialise(self.initialPageId)
     
     # ———ハイパーテキストの構築
+    # ハイパーテキストの構築起点を変更する
+    def changeInitialPage(self, id: int):
+        if id in self.record:
+            self.initialPageId = id
+        else:
+            raise ValueError
+    
     # ハイパーテキストを構築する
-    def construct(self, locationId: int):
+    def constructHypertext(self, locationId: int):
+        print(locationId, self.hypertext)
         # ページが周回済みだった場合
         if locationId in self.hypertext:
             return
         
         # ページが存在しなかった（初めからないか、削除されている）場合
-        location = self.server.getPage(locationId)
+        location = self.getPage(locationId)
         if location is None:
             return
 
@@ -152,29 +138,30 @@ class Web:
 
         # リンク先の各ページを起点にハイパーテキストを構築する
         for i in location.destinationIds:
-            self.construct(i)
+            self.constructHypertext(i)
     
     # ハイパーテキストを初期化して構築する
-    def initialise(self, initialPageId: int):
-        self.changeInitialPage(initialPageId)
+    def initialiseHypertext(self, initialPageId: int = None):
+        if initialPageId and initialPageId != self.initialPageId:
+            self.changeInitialPage(initialPageId)
         self.hypertext.clear()
-        self.construct(initialPageId)
+        self.constructHypertext(self.initialPageId)
     
     # ハイパーテキストを更新する
-    def crawl(self):
+    def crawlHypertext(self):
         gonePageIds = set()
         appearedPageIds = set()
 
         # 保存されているハイパーテキストにあるページを順に確認する
         for locationId in self.hypertext:
             # ページが削除されていれば記録する
-            if self.server.getPage(locationId) is None:
+            if self.getPage(locationId) is None:
                 gonePageIds.add(locationId)
                 continue
             
             # ページ内のハイパーリンクを新旧比較する
             oldDestinationIds = self.hypertext[locationId]
-            newDestinationIds = self.server.getPage(locationId).destinationIds
+            newDestinationIds = self.getPage(locationId).destinationIds
             if oldDestinationIds != newDestinationIds:
                 # ハイパーリンクを上書き保存する
                 self.hypertext[locationId] = copy.copy(newDestinationIds)
@@ -188,16 +175,9 @@ class Web:
 
         # 新たに現れたページを起点にハイパーテキストを構築する
         for id in appearedPageIds:
-            self.construct(id)
+            self.constructHypertext(id)
     
-    # ハイパーテキストの構築起点を変更する
-    def changeInitialPage(self, id: int):
-        if id in self.server.record.keys():
-            self.initialPageId = id
-        else:
-            raise ValueError
-    
-    # ハイパーリンクの集合をハイパーテキストに変換する（サーバとは独立）
+    # ハイパーリンクの集合をハイパーテキストに変換する
     # 新たに Page を生成する
     @classmethod
     def makeHypertextFromHyperlinks(cls, hyperlinks: set[tuple[int, int]]):
@@ -286,7 +266,7 @@ class Web:
         def getTransposeHypertext():
             hyperlinks = self.getHyperlinks()
             transpose = {hyperlink[::-1] for hyperlink in hyperlinks}
-            return Web.makeHypertextFromHyperlinks(transpose)
+            return Server.makeHypertextFromHyperlinks(transpose)
 
         ## 取得の実行
         transposeHypertext = getTransposeHypertext()
@@ -344,7 +324,7 @@ class Web:
         return getComponents()
     
     # 強結合成分の個数を取得する
-    def isStronglyConnected(self):
+    def hypertextIsStronglyConnected(self):
         return len(self.getSCCs())
     
     # ———その他
@@ -366,12 +346,12 @@ class Web:
                 print("→".join(walk)+("→" if walk else "")+str(locationId))
                 print(f"You reached page {treasure}!")
             # 現在地に相当するページが存在しなかった場合
-            elif self.server.getPage(locationId) is None:
+            elif self.getPage(locationId) is None:
                 print(f"Page {locationId} is gone!")
                 proceed(int(walk[-1]), walk[:-1])
             # 現在地が目的地以外のページだった場合
             else:
-                print("→".join(walk)+("→" if walk else "")+str(locationId)+"→"+str(self.server.getPage(locationId).destinationIds))
+                print("→".join(walk)+("→" if walk else "")+str(locationId)+"→"+str(self.getPage(locationId).destinationIds))
                 v = input(f"Go to: ")
                 
                 # 入力値が"quit"だった場合
@@ -393,7 +373,7 @@ class Web:
                     destination = int(v)
 
                     # 入力されたページに現在地からアクセスできない場合
-                    if destination not in self.server.getPage(locationId).destinationIds:
+                    if destination not in self.getPage(locationId).destinationIds:
                         print(f"Can't move to {v}")
                         if proceed(locationId, walk): return 1
                     # 入力されたページに現在地からアクセスできる場合
@@ -423,12 +403,12 @@ class Web:
             print("]")
             return
         # 現在地に相当するページが存在しなかった場合
-        elif self.server.getPage(locationId) is None:
+        elif self.getPage(locationId) is None:
             print("/")
             return
         # 現在地が目的地以外のページだった場合
         else:
-            choices = self.server.getPage(locationId).destinationIds
+            choices = self.getPage(locationId).destinationIds
             self.randomwalk(random.choice(list(choices)), destinationId, (None if maxStep is None else maxStep-1), walk+[str(locationId)])
 
 
@@ -467,9 +447,9 @@ if __name__ == "__main__":
     page11 = Page(11, "l", set())
     page12 = Page(12, "m", {5, 9})
     server = Server({page0, page1, page2, page3, page4, page5, page6, page7, page8, page9, page10, page11, page12})
-    web = Web(server, 1)
-    print("hypertext:", web.getSortedHypertext())
-    print(web.isStronglyConnected(), "SCCs")
+    server.initialiseHypertext()
+    print("hypertext:", server.getSortedHypertext())
+    print(server.hypertextIsStronglyConnected(), "SCCs")
     print("\n——————————\n")
     
     """
@@ -499,9 +479,9 @@ if __name__ == "__main__":
     page7.addLink(6)
     page13 = Page(13, "n", {6})
     server.addPage(page13)
-    web.crawl()
-    print("hypertext:", web.getSortedHypertext())
-    print(web.isStronglyConnected(), "SCCs")
+    server.crawlHypertext()
+    print("hypertext:", server.getSortedHypertext())
+    print(server.hypertextIsStronglyConnected(), "SCCs")
     print("\n——————————\n")
     
     """
@@ -526,9 +506,9 @@ if __name__ == "__main__":
             7 ⇦
     """
     
-    web.initialise(13)
-    print("hypertext:", web.getSortedHypertext())
-    print(web.isStronglyConnected(), "SCCs")
+    server.initialiseHypertext(13)
+    print("hypertext:", server.getSortedHypertext())
+    print(server.hypertextIsStronglyConnected(), "SCCs")
     print("\n——————————\n")
     
     # web.explore()
@@ -547,7 +527,7 @@ if __name__ == "__main__":
     paged = Page(23, "", {21})
     pagee = Page(24, "", {})
     servera = Server({pagea, pageb, pagec, paged, pagee})
-    weba = Web(servera, 20)
-    print("hypertext:", weba.getSortedHypertext())
-    print(web.isStronglyConnected(), "SCCs")
+    servera.initialiseHypertext()
+    print("hypertext:", servera.getSortedHypertext())
+    print(servera.hypertextIsStronglyConnected(), "SCCs")
     print("\n——————————\n")
