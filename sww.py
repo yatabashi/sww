@@ -34,7 +34,7 @@
     https://drken1215.hatenablog.com/entry/2023/05/20/200517
 
 全てのページに到達可能なページが存在するか、存在するならそれは何かを取得する関数、ひいてはそれをinit-に設定する関数が可能
-   
+
 ファイルシステム
 """
 """
@@ -45,12 +45,6 @@
 """
 ハイパーテキストは、ページをノードと、リンクをエッジとして、ループ付きの有向グラフと見做すことができる。
 ここでは、単一のサーバにアップロードされ、ハイパーリンクで結ばれた（あるいは結ばれていない）ページ群を考える。
-
-なお、ページ A からページ B とページ C にリンクが飛んでいるが、
-ページ B は削除されており、ページ C はどこにもリンクしていないという状態を考えると、
-ページ B からのハイパーリンクは未定義であり、ページ C からのハイパーリンクは None であるという違いがあり、
-Web.hypertext はこれを区別する。
-しかし、グラフとして見たときにはこの違いは捨象される。
 """
 
 
@@ -87,6 +81,7 @@ class Server:
         self.hypertext: dict[int, set[int]] = dict()  # ハイパーテキストを隣接リストとして保持する
         self.initialPageId: int = initialPageId if initialPageId else getMember(self.record.keys())  # クローリング周回の起点となるページ
     
+    # ——— record に対する操作
     # 指定の id を持つページを返す
     def getPage(self, id: int) -> Union[Page, None]:
         return self.record.get(id)
@@ -100,27 +95,7 @@ class Server:
         for id in ids:
             self.record.pop(id, None)
     
-    # ハイパーリンクの集合をハイパーテキストに変換する
-    @classmethod
-    def makePagesFromHyperlinks(cls, hyperlinks: set[tuple[int, int]]):
-        d: dict[int, Page] = dict()
-        
-        for hyperlink in hyperlinks:
-            if hyperlink[0] in d:
-                d[hyperlink[0]].destinationIds.add(hyperlink[1])
-            else:
-                d[hyperlink[0]] = Page(hyperlink[0], "", {hyperlink[1]})
-                
-        return d.values()
-    
     # ———ハイパーテキストの構築
-    # ハイパーテキストの構築起点を変更する
-    def changeInitialPage(self, id: int):
-        if id in self.record:
-            self.initialPageId = id
-        else:
-            raise ValueError
-    
     # ハイパーテキストを構築する
     def constructHypertext(self, locationId: int):
         print(locationId, self.hypertext)
@@ -177,8 +152,27 @@ class Server:
         for id in appearedPageIds:
             self.constructHypertext(id)
     
-    # ハイパーリンクの集合をハイパーテキストに変換する
-    # 新たに Page を生成する
+    # ハイパーテキストの構築起点を変更する
+    def changeInitialPage(self, id: int):
+        if id in self.record:
+            self.initialPageId = id
+        else:
+            raise ValueError
+    
+    # ハイパーリンクの集合を元にページ群を（新たに）生成する
+    @classmethod
+    def makePagesFromHyperlinks(cls, hyperlinks: set[tuple[int, int]]):
+        d: dict[int, Page] = dict()
+        
+        for hyperlink in hyperlinks:
+            if hyperlink[0] in d:
+                d[hyperlink[0]].destinationIds.add(hyperlink[1])
+            else:
+                d[hyperlink[0]] = Page(hyperlink[0], "", {hyperlink[1]})
+                
+        return d.values()
+    
+    # ハイパーリンクの集合からハイパーテキストを生成する
     @classmethod
     def makeHypertextFromHyperlinks(cls, hyperlinks: set[tuple[int, int]]):
         d: dict[int, set[int]] = dict()
@@ -447,7 +441,7 @@ if __name__ == "__main__":
     page11 = Page(11, "l", set())
     page12 = Page(12, "m", {5, 9})
     server = Server({page0, page1, page2, page3, page4, page5, page6, page7, page8, page9, page10, page11, page12})
-    server.initialiseHypertext()
+    server.initialiseHypertext(0)
     print("hypertext:", server.getSortedHypertext())
     print(server.hypertextIsStronglyConnected(), "SCCs")
     print("\n——————————\n")
@@ -517,6 +511,7 @@ if __name__ == "__main__":
     #     web.randomwalk(9, 3, 9)
     
     """
+    ⇩
     0 → 1 → 2 → 4
         ↑ ↙︎
         3
@@ -527,7 +522,7 @@ if __name__ == "__main__":
     paged = Page(23, "", {21})
     pagee = Page(24, "", {})
     servera = Server({pagea, pageb, pagec, paged, pagee})
-    servera.initialiseHypertext()
+    servera.initialiseHypertext(20)
     print("hypertext:", servera.getSortedHypertext())
     print(servera.hypertextIsStronglyConnected(), "SCCs")
     print("\n——————————\n")
