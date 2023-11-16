@@ -233,8 +233,8 @@ class Server:
                 else:
                     visitedPageIds.add(locationId)
                     # 各リンク先において片道のラベリングを行う
-                    for destinaionId in hypertext.get(locationId):
-                        n = label_oneway(destinaionId, n) # 次のラベルの値を与え、再帰する
+                    for destinationId in hypertext.get(locationId):
+                        n = label_oneway(destinationId, n) # 次のラベルの値を与え、再帰する
                     pageIdToLabel[locationId] = n
                     n += 1
                     return n
@@ -290,7 +290,7 @@ class Server:
 
             # 未周回のページがあるならば
             if transposeHypertext.keys() - visitedPageIds:
-                nonlocal pageIdTolabel
+                nonlocal pageIdToLabel
                 nonlocal labelToPageId
 
                 if printsDetails: print("labelling:", labelToPageId)
@@ -301,8 +301,8 @@ class Server:
 
                 # 分解された成分に割り当てられたラベリングの削除
                 # 最大のラベルを取得しやすくする
-                pageIdTolabel = {pageId: label for (pageId, label) in pageIdTolabel.items() if pageId not in component}
-                labelToPageId = {label: pageId for (pageId, label) in pageIdTolabel.items()}
+                pageIdToLabel = {pageId: label for (pageId, label) in pageIdToLabel.items() if pageId not in component}
+                labelToPageId = {label: pageId for (pageId, label) in pageIdToLabel.items()}
                 if printsDetails: print("component:", component)
 
                 # 分解された成分を強連結成分の集合に追加する
@@ -417,14 +417,6 @@ if __name__ == "__main__":
     3 → 4 ← 5 ⇄ 12
       ↖︎ ↓ ↗︎ ↑
         7  (6)
-
-        0   8 ← 10
-      ↙︎ ⇅     ↘︎ ↑
-  ⇨ 1 → 2       9 → 11
-    ↓ ↗︎ ↑   ∩   ↑
-    3 → 4 ← 5 ⇄ 12
-      ↖︎ ↓ ↗︎ ↑
-        7  (g)
     """
     
     page0 = Page(0, "a", {1, 2})
@@ -456,16 +448,6 @@ if __name__ == "__main__":
         7 → 6
             ↑
            (13)
-    
-       ~0~  11← 8
-        ↑     ↖︎ ↑
-    7 → 1       10→ 9
-    ↓ ↗︎ ↑   ∩   ↑
-    6 → 5 ← 2 ← 12
-      ↖︎ ↓ ↗︎ ↑
-        4 → 3
-            ↑
-           (n)
     """
     
     server.deletePage(0)
@@ -488,21 +470,17 @@ if __name__ == "__main__":
         7 → 6
             ↑
             13⇦
-    
-       ~0~
-        ↑
-        1
-      ↗︎ ↑   ∩
-    2 → 4 ← 5
-      ↖︎ ↓ ↗︎ ↑
-        3 → 6
-            ↑
-            7 ⇦
     """
     
     server.initialiseHypertext(13)
     print("hypertext:", server.getSortedHypertext())
+    print("hyperlinks:", server.getSortedHyperlinks())
+    # print(server.getRoot(), "is a root")
+    # print(server.getSCCs())
     print(server.hypertextIsStronglyConnected(), "SCCs")
+    print(server.hypertextIsStronglyConnected_nonrec(), "SCCs (nonrec)")
+    # print("descendant of 7:", server.getdescendantPageIds(7))
+    # print("descendant of 10:", server.getdescendantPageIds(10))
     print("\n——————————\n")
     
     # web.explore()
