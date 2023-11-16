@@ -194,7 +194,14 @@ class Server:
             s.update({(startId, endId) for endId in endIds})
                 
         return s
-         
+    
+    # 与えられたハイパーテキストの全てのリンクを反転させた転置グラフを生成する
+    @classmethod
+    def getTransposeHypertext(cls, hypertext: dict[int, set[int]]) -> dict[int, set[int]]:
+        hyperlinks = Server.getHyperlinksFromHyperText(hypertext)
+        transpose = {hyperlink[::-1] for hyperlink in hyperlinks}
+        return Server.makeHypertextFromHyperlinks(transpose)
+        
     # ———ハイパーテキストの表示
     # ハイパーテキストの構造を返す
     def getHypertext(self) -> dict[int, set[int]]:
@@ -212,7 +219,47 @@ class Server:
     def getSortedHyperlinks(self) -> set[tuple[int, int]]:
         return sorted(list(self.getHyperlinks()))
     
-    # ———グラフ理論的な操作
+    # ———ハイパーテキストの情報取得
+    # 指定したページから到達可能なページのリストを取得する
+    def getdescendantPageIds(self, originId: int) -> set[int]:
+        descendants = set()
+        stack = [originId]
+        
+        while stack:
+            locationId = stack.pop()
+            
+            # ページが未周回なら
+            if locationId not in descendants:
+                descendants.add(locationId)
+                
+                page = self.getPage(locationId)
+                # ページが存在しないなら
+                if page is None:
+                    continue
+                # ページが存在するなら
+                else:
+                    for child in page.destinationIds:
+                        if child not in descendants:  # この分岐は必須ではないが、ループ回数削減に寄与する
+                            stack.append(child)
+            
+        return descendants
+    
+    # 根（リンクを辿って全てのページに到達可能なページ）を一つ取得する
+    def getRoot(self):
+        pageIds = self.hypertext.keys()
+        stack = [getMember(pageIds)]
+        
+        while stack:
+            locationId = stack.pop()
+            
+            if self.getdescendantPageIds(locationId) >= pageIds:
+                return locationId
+            else:
+                continue
+        
+        return None
+    
+    # ———ハイパーテキストに変更を加える操作：いずれも副作用を持たない形で定義されている
     # ハイパーテキストを強連結成分（Strongly Connected Components）分解する
     # 有向グラフの強連結成分とは、その部分木であって任意の2頂点間に双方向に有向路がある（＝強連結である）ものを言う
     # Kosaraju のアルゴリズムに相当する
