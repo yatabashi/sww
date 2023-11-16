@@ -116,7 +116,7 @@ class Server:
     
     # ハイパーテキストを初期化して構築する
     def initialiseHypertext(self, initialPageId: int = None):
-        if initialPageId and initialPageId != self.initialPageId:
+        if initialPageId is not None and initialPageId != self.initialPageId:
             self.changeInitialPage(initialPageId)
         self.hypertext.clear()
         self.constructHypertext(self.initialPageId)
@@ -184,7 +184,18 @@ class Server:
                 
         return d
     
-    # ———ハイパーテキストからの情報取得
+    # 与えられたハイパーテキストからハイパーリンクを得る
+    @classmethod
+    def getHyperlinksFromHyperText(cls, hypertext: dict[int, set[int]]) -> set[tuple[int, int]]:
+        s = set()
+
+        # ハイパーリンクをタプルに変換する
+        for (startId, endIds) in hypertext.items():
+            s.update({(startId, endId) for endId in endIds})
+                
+        return s
+         
+    # ———ハイパーテキストの表示
     # ハイパーテキストの構造を返す
     def getHypertext(self) -> dict[int, set[int]]:
         return self.hypertext
@@ -195,13 +206,7 @@ class Server:
     
     # ハイパーテキスト内の全リンクを返す
     def getHyperlinks(self) -> set[tuple[int, int]]:
-        s = set()
-
-        # ハイパーリンクをタプルに変換する
-        for (startId, endIds) in self.hypertext.items():
-            s.update({(startId, endId) for endId in endIds})
-                
-        return s
+        return Server.getHyperlinksFromHyperText(self.hypertext)
     
     # ハイパーテキスト内の全リンクをソートして返す
     def getSortedHyperlinks(self) -> set[tuple[int, int]]:
@@ -251,18 +256,12 @@ class Server:
                 return pageIdToLabel
         
         ## ラベリングの実行
-        pageIdTolabel = label()
-        labelToPageId = {label: pageId for (pageId, label) in pageIdTolabel.items()}
+        pageIdToLabel = label()
+        if printsDetails: print("Labelling:", pageIdToLabel)
+        labelToPageId = {label: pageId for (pageId, label) in pageIdToLabel.items()}
 
         # ハイパーテキストの転置グラフ*を取得する
-        # *すべてのエッジ（リンク）を反転させたものを言う
-        def getTransposeHypertext() -> dict[int, set[int]]:
-            hyperlinks = self.getHyperlinks()
-            transpose = {hyperlink[::-1] for hyperlink in hyperlinks}
-            return Server.makeHypertextFromHyperlinks(transpose)
-
-        ## 取得の実行
-        transposeHypertext = getTransposeHypertext()
+        transposeHypertext = Server.getTransposeHypertext(self.getHypertext())
 
         # decompose: 辿り直して分解
         def getComponents(foundComponents: set[frozenset[int]] = set(), visitedPageIds: set[int] = set()) -> set[frozenset[int]]:
