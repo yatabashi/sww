@@ -113,6 +113,29 @@ class Server:
         # リンク先の各ページを起点にハイパーテキストを構築する
         for i in location.destinationIds:
             self.constructHypertext(i)
+            
+    # ハイパーテキストを構築する（非再帰）
+    def constructHypertext_nonrec(self, originId: int):
+        hypertext: dict[int, set[int]] = dict()
+        stack = [originId]
+        
+        while stack:
+            locationId = stack.pop()
+            
+            # ページが存在しないなら
+            page = self.getPage(locationId)
+            if page is None:
+                continue
+            
+            # ページが未周回なら
+            if locationId not in hypertext:
+                hypertext[locationId] = copy.copy(page.destinationIds)
+                
+                for child in page.destinationIds:
+                    if child not in hypertext:  # この分岐は必須ではないが、ループ回数削減に寄与する
+                        stack.append(child)
+        
+        self.hypertext = hypertext
     
     # ハイパーテキストを初期化して構築する
     def initialiseHypertext(self, initialPageId: int = None):
@@ -362,6 +385,135 @@ class Server:
             
         return getComponents()
     
+    # 強連結成分分解（非再帰）
+    def getSccs_nonrec(self, printsDetails: bool = False) -> set[frozenset[int]]:
+         # ページをラベリングする
+        """
+        ラベリング手順（例）
+        
+        1 → 2 → 3
+            ↘︎ ↑
+            4 ⇄ 5
+            
+                                            ┌children visited?
+        Stack   : numbered? : hasChild? : cnVsted?  : assigned number if qualified : note
+        
+        if      : False     : False     : None
+                or : False     : True      : True      : then a number is assigned
+                
+        1       : False     : True      : False
+        124     : False     : True      : False
+        12425   : False     : True      : True      : 0
+        1242    : False     : True      : False
+        12423   : False     : False     : None      : 1
+        1242    : False     : True      : True      : 2
+        124     : False     : True      : True      : 3
+        12      : True
+        1       : False     : True      : True      : 4
+        """
+        
+        hypertext = self.getHypertext()
+        
+        pageIdToLabel: dict[int, int] = dict()
+        visitedPageIds: set[int] = set()
+        n = 0
+        
+        # ラベリングされていないページがある限り
+        while leftPageIds := hypertext.keys() - visitedPageIds:
+            stack = [getMember(leftPageIds)]
+            if printsDetails: print("Start labelling from", stack[0], "with", pageIdToLabel)
+            
+            # 適当なページから到達可能な全てのページに対してラベリングを行う
+            while stack:
+                locationId = stack.pop()
+                if printsDetails: print(" Stack:", stack, "Now at", locationId)
+                
+                # すでにラベリングされているなら無視
+                if locationId in pageIdToLabel:
+                    if printsDetails: print("  Already labelled")
+                    continue
+                
+                # 自身を周回済にする
+                visitedPageIds.add(locationId)
+                
+                # ラベリングされるのは以下の場合
+                # 未付番かつ以下のいずれかにあてはまる
+                # 1. 消失している
+                # 2. 子がいない
+                # 3. 子が全て以下のいずれかにあてはまる
+                #     1. 周回済（含付番済）である
+                #     2. 親（自身）と同一である
+                needLabelling = (destinationIds := hypertext.get(locationId)) is None \
+                                or not destinationIds \
+                                or destinationIds <= visitedPageIds | {locationId}
+                if needLabelling:
+                    if printsDetails: print("  Needs labelling")
+                    pageIdToLabel[locationId] = n  # ラベリングする
+                    n += 1                         # 次に付けられるべきラベルの値を返す
+                # ラベリングするべきでない場合（リンク先を先に処理すべき場合）
+                else:
+                    if printsDetails: print("  Later; links:", hypertext.get(locationId))
+                    visitedPageIds.add(locationId)
+                    stack.append(locationId)
+                    for destinaionId in hypertext.get(locationId):
+                        stack.append(destinaionId)
+        
+        if printsDetails: print("Labelling:", pageIdToLabel)
+        labelToPageId = {label: pageId for (pageId, label) in pageIdToLabel.items()}
+        
+        # ハイパーテキストの転置グラフを取得する
+        transposeHypertext = Server.getTransposeHypertext(self.getHypertext())
+                
+        # 分解
+        if printsDetails: print("——— Decomposing")
+        components: set[frozenset[int]] = set()
+        leftPageIds = set(pageIdToLabel.keys())
+        
+        while labelToPageId:
+            if printsDetails: print("Components:", components)
+            if printsDetails: print("Labelling :", labelToPageId)
+            PageIdWithMaxLabel = labelToPageId[max(labelToPageId.keys())]
+            stack = [PageIdWithMaxLabel]
+            component = set()
+            
+            while stack:
+                if printsDetails: print(" Stack     :", stack)
+                
+                locationId = stack.pop()
+                
+                # 強連結成分の一部として確定されるのは次のいずれかに当て嵌まったとき：
+                # 1. （逆ハイパーテキスト上での）リンク先がない
+                # 2. リンク先が全てすでに分離された強連結成分あるいは今分離しようとしている強連結成分に含まれる
+                # 3. リンク先が全て強連結成分に含まれるか、周回済である
+                needsExtracting = (destinationIds := transposeHypertext.get(locationId)) is None \
+                                  or destinationIds <= component | (pageIdToLabel.keys() - labelToPageId.values()) \
+                                  or destinationIds <= component | (pageIdToLabel.keys() - labelToPageId.values()) | set(stack)
+                
+                # 逆リンク先がない場合（もとのハイパーテキストでどこからもリンクされていない場合）
+                if needsExtracting:
+                    component.add(locationId)
+                else:
+                    if printsDetails: print("  Links found:", destinationIds)
+                    component.add(locationId)
+                    for destinationId in destinationIds:
+                        # stack すべきは以下の全てを満たすもの
+                        # 1. すでに別の成分の頂点として分離されていない（labelToPageId.values() に含まれる）
+                        # 2. すでに component に含められていない
+                        # 3. すでに stack に追加されていない
+                        needsStacking = destinationId in labelToPageId.values() \
+                                        and destinationId not in component \
+                                        and destinationId not in stack
+                        
+                        if needsStacking:
+                            stack.append(destinationId)
+                            
+                if printsDetails: print("  Component-update:", component)
+            
+            components.add(frozenset(component))
+            labelToPageId = {label: pageId for (label, pageId) in labelToPageId.items() if pageId not in component}
+        
+        return components
+    
     # 強結合成分の個数を取得する
     def hypertextIsStronglyConnected(self) -> int:
         return len(self.getSCCs())
@@ -481,7 +633,13 @@ if __name__ == "__main__":
     server = Server({page0, page1, page2, page3, page4, page5, page6, page7, page8, page9, page10, page11, page12})
     server.initialiseHypertext(0)
     print("hypertext:", server.getSortedHypertext())
+    print("hyperlinks:", server.getSortedHyperlinks())
+    # print(server.getRoot(), "is a root")
+    # print(server.getSCCs())
     print(server.hypertextIsStronglyConnected(), "SCCs")
+    print(server.hypertextIsStronglyConnected_nonrec(), "SCCs (nonrec)")
+    # print("descendant of 7:", server.getdescendantPageIds(7))
+    # print("descendant of 10:", server.getdescendantPageIds(10))
     print("\n——————————\n")
     
     """
@@ -503,7 +661,13 @@ if __name__ == "__main__":
     server.addPage(page13)
     server.crawlHypertext()
     print("hypertext:", server.getSortedHypertext())
+    print("hyperlinks:", server.getSortedHyperlinks())
+    # print(server.getRoot(), "is a root")
+    # print(server.getSCCs(True))
     print(server.hypertextIsStronglyConnected(), "SCCs")
+    print(server.hypertextIsStronglyConnected_nonrec(), "SCCs (nonrec)")
+    # print("descendant of 7:", server.getdescendantPageIds(7))
+    # print("descendant of 10:", server.getdescendantPageIds(10))
     print("\n——————————\n")
     
     """
@@ -548,5 +712,29 @@ if __name__ == "__main__":
     servera = Server({pagea, pageb, pagec, paged, pagee})
     servera.initialiseHypertext(20)
     print("hypertext:", servera.getSortedHypertext())
+    print("hyperlinks:", servera.getSortedHyperlinks())
+    # print(servera.getRoot(), "is a root")
+    # print(servera.getSCCs())
     print(servera.hypertextIsStronglyConnected(), "SCCs")
+    print(servera.hypertextIsStronglyConnected_nonrec(), "SCCs (nonrec)")
+    # print("descendant of 20:", servera.getdescendantPageIds(20))
+    # print("descendant of 22:", servera.getdescendantPageIds(22))
     print("\n——————————\n")
+
+    """
+    1 → 2 → 3
+      ↘︎ ↑
+        4 ⇄ 5
+    """
+    pageone = Page(1, "", {2, 4})
+    pagetwo = Page(2, "", {3})
+    pagethr = Page(3, "", set())
+    pagefou = Page(4, "", {2, 5})
+    pagefiv = Page(5, "", {4})
+    serverserv = Server({pageone, pagetwo, pagethr, pagefou, pagefiv})
+    serverserv.initialiseHypertext(1)
+    print("hypertext:", serverserv.getSortedHypertext())
+    print("hyperlinks:", serverserv.getSortedHyperlinks())
+    print(serverserv.hypertextIsStronglyConnected(), "SCCs")
+    print(serverserv.hypertextIsStronglyConnected_nonrec(), "SCCs (nonrec)")
+    
