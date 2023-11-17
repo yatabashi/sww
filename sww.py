@@ -51,11 +51,19 @@
 from typing import Type, Union
 import copy
 import random
+import queue
 
 # set から要素を一つ取り出す関数
 def getMember(s: set) -> any:
     for m in s:
         return m
+
+# 集合のリストから、リスト内の全ての集合の和集合を得る関数
+def mergeSets(l: list[set]) -> set:
+    v = set()
+    for s in l:
+        v |= s
+    return v
 
 # Webページに相当する
 class Page:
@@ -279,6 +287,83 @@ class Server:
                 return locationId
             else:
                 continue
+        
+        return None
+    
+    # 始点と終点を指定し、その2ページ間の距離（到達に必要な最短のリンク数）を取得する
+    def getDistance(self, startPageId: int, endPageId: int, printsDetails: bool = False):
+        # 始点と終点の実在性を確認
+        allPagesLinked = self.hypertext.keys() | mergeSets(self.hypertext.values())
+        if not (startPageId in allPagesLinked and endPageId in allPagesLinked):
+            return None
+        
+        # 始点と終点が同一の場合
+        if startPageId == endPageId:
+            return 0
+        
+        # 幅優先探索
+        q = queue.Queue()
+        q.put(startPageId)
+        visited = {startPageId}
+        depth = 0
+        same = 1
+        next = 0
+        """
+            0   8 ← 10
+          ↙︎ ⇅     ↘︎ ↑
+      ⇨ 1 → 2       9 → 11
+        ↓ ↗︎ ↑   ∩   ↑
+        3 → 4 ← 5 ⇄ 12
+          ↖︎ ↓ ↗︎ ↑
+            7  (6)
+        
+        右入れ左出しに書き換え
+      ( -1 [] {} same:1 next:0        )
+      (     0 [12] {12} same:0 next:1 )
+        0 [12] {12} same:1 next:0
+            0 [9, 5] {12, 9, 5} same:0 next:2
+        1 [9, 5] {12, 9, 5} same:2 next:0
+            1 [5, 10, 11] {12, 9, 5, 10, 11} same:1 next:2
+            1 [10, 11, 4] {12, 9, 5, 10, 11, 4} same:0 next:3
+        2 [10, 11, 4] {12, 9, 5, 10, 11, 4} same:3 next:0
+            2 [11, 4, 8] {12, 9, 5, 10, 11, 4, 8} same:2 next:0
+            2 [4, 8] {12, 9, 5, 10, 11, 4, 8} same:1 next:1
+            2 [8, 2, 7] {12, 9, 5, 10, 11, 4, 8, 2, 7} same:0 next:3
+        3 [8, 2, 7] {12, 9, 5, 10, 11, 4, 8, 2, 7} same:3 next:0
+            3 [2, 7] {12, 9, 5, 10, 11, 4, 8, 2, 7} same:2 next:0
+            3 [7, 0] {12, 9, 5, 10, 11, 4, 8, 2, 7, 0} same:1 next:1
+            3 [0, 3] {12, 9, 5, 10, 11, 4, 8, 2, 7, 0, 3} same:0 next:2
+        4 [0, 3] {12, 9, 5, 10, 11, 4, 8, 2, 7, 0, 3}
+            4 [0] {12, 9, 5, 10, 11, 4, 8, 2, 7, 0, 3}
+            4 [1] {12, 9, 5, 10, 11, 4, 8, 2, 7, 0, 3, 1}
+            -> 発見
+        5 [1]
+        -> 発見
+        """
+        
+        while q:
+            if same == 0:
+                same = next
+                next = 0
+                depth += 1
+            
+            if printsDetails:
+                print(depth, q.queue)
+                print(" Left pages on the same level:", same)
+                print(" pages on the next level     :", next)
+            
+            locationId = q.get()
+            
+            for destinationId in self.hypertext.get(locationId):
+                if destinationId == endPageId:
+                    return depth + 1
+                else:
+                    if destinationId not in visited:
+                        visited.add(destinationId)
+                        next += 1
+                        q.put(destinationId)
+            
+            same -= 1
         
         return None
     
@@ -635,11 +720,12 @@ if __name__ == "__main__":
     print("hypertext:", server.getSortedHypertext())
     print("hyperlinks:", server.getSortedHyperlinks())
     # print(server.getRoot(), "is a root")
-    # print(server.getSCCs())
+    # print("SCCs:", server.getSCCs())
     print(server.hypertextIsStronglyConnected(), "SCCs")
-    print(server.hypertextIsStronglyConnected_nonrec(), "SCCs (nonrec)")
+    print(len(server.getSccs_nonrec()), "SCCs (nonrec)")
     # print("descendant of 7:", server.getdescendantPageIds(7))
     # print("descendant of 10:", server.getdescendantPageIds(10))
+    print("12 to 1:", server.getDistance(12, 1), "links")
     print("\n——————————\n")
     
     """
@@ -663,11 +749,12 @@ if __name__ == "__main__":
     print("hypertext:", server.getSortedHypertext())
     print("hyperlinks:", server.getSortedHyperlinks())
     # print(server.getRoot(), "is a root")
-    # print(server.getSCCs(True))
+    # print("SCCs:", server.getSCCs())
     print(server.hypertextIsStronglyConnected(), "SCCs")
-    print(server.hypertextIsStronglyConnected_nonrec(), "SCCs (nonrec)")
+    print(len(server.getSccs_nonrec()), "SCCs (nonrec)")
     # print("descendant of 7:", server.getdescendantPageIds(7))
     # print("descendant of 10:", server.getdescendantPageIds(10))
+    print("12 to 0:", server.getDistance(12, 0), "links")
     print("\n——————————\n")
     
     """
@@ -686,11 +773,12 @@ if __name__ == "__main__":
     print("hypertext:", server.getSortedHypertext())
     print("hyperlinks:", server.getSortedHyperlinks())
     # print(server.getRoot(), "is a root")
-    # print(server.getSCCs())
+    # print("SCCs:", server.getSCCs())
     print(server.hypertextIsStronglyConnected(), "SCCs")
-    print(server.hypertextIsStronglyConnected_nonrec(), "SCCs (nonrec)")
+    print(len(server.getSccs_nonrec()), "SCCs (nonrec)")
     # print("descendant of 7:", server.getdescendantPageIds(7))
     # print("descendant of 10:", server.getdescendantPageIds(10))
+    print("13 to 0:", server.getDistance(13, 0), "links")
     print("\n——————————\n")
     
     # web.explore()
@@ -708,19 +796,20 @@ if __name__ == "__main__":
     pageb = Page(21, "", {22})
     pagec = Page(22, "", {23, 24})
     paged = Page(23, "", {21})
-    pagee = Page(24, "", {})
+    pagee = Page(24, "", set())
     servera = Server({pagea, pageb, pagec, paged, pagee})
     servera.initialiseHypertext(20)
     print("hypertext:", servera.getSortedHypertext())
     print("hyperlinks:", servera.getSortedHyperlinks())
     # print(servera.getRoot(), "is a root")
-    # print(servera.getSCCs())
+    # print("SCCs:", server.getSCCs())
     print(servera.hypertextIsStronglyConnected(), "SCCs")
-    print(servera.hypertextIsStronglyConnected_nonrec(), "SCCs (nonrec)")
+    print(len(servera.getSccs_nonrec()), "SCCs (nonrec)")
     # print("descendant of 20:", servera.getdescendantPageIds(20))
     # print("descendant of 22:", servera.getdescendantPageIds(22))
+    print("23 to 24:", servera.getDistance(23, 24), "links")
     print("\n——————————\n")
-
+    
     """
     1 → 2 → 3
       ↘︎ ↑
@@ -736,5 +825,5 @@ if __name__ == "__main__":
     print("hypertext:", serverserv.getSortedHypertext())
     print("hyperlinks:", serverserv.getSortedHyperlinks())
     print(serverserv.hypertextIsStronglyConnected(), "SCCs")
-    print(serverserv.hypertextIsStronglyConnected_nonrec(), "SCCs (nonrec)")
-    
+    print(len(server.getSccs_nonrec()), "SCCs (nonrec)")
+    print("5 to 3:", serverserv.getDistance(5, 3), "links")
