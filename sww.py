@@ -26,14 +26,35 @@
     単に visitied だけ見た場合？
     https://drken1215.hatenablog.com/entry/2023/05/20/200517
 
-全てのページに到達可能なページが存在するか、存在するならそれは何かを取得する関数、ひいてはそれをinit-に設定する関数が可能
-
 ファイルシステム
+    ハイパーテキスト：
+    ・ページからなる
+    ・どのページからどのページにも飛べる
+    →閉路を含みうる
+
+    ファイルシステム：
+    ・ディレクトリとファイルからなる
+    ・ディレクトリは親ディレクトリ、自分自身、子ディレクトリとファイルへのリンクを持つ
+    　・複数のディレクトリに同じファイルが存在することもできる（ハードリンク）
+    ・ファイルはリンクを持たない
+    　・別のファイルを参照するファイルはありうる（シンボリックリンク／エイリアス）
+    →原則として閉路は含まれない（ハードリンク等があれば可能）
+
+弱連結・片側連結
+    http://x-n.io/doc/graph-theory-terms
+    https://www.geeksforgeeks.org/check-if-a-graph-is-strongly-unilaterally-or-weakly-connected/
+
+ランダムなグラフの生成
+
+別サーバへのアクセス hyper-server?
 """
 """
 強連結成分分解：
     https://manabitimes.jp/math/1250
     https://hkawabata.github.io/technical-note/note/Algorithm/graph/scc.html
+
+descendantsの取得：
+    https://www.hongo.wide.ad.jp/~jo2lxq/dm/lecture/07.pdf
 """
 """
 ハイパーテキストは、ページをノードと、リンクをエッジとして、ループ付きの有向グラフと見做すことができる。
@@ -264,22 +285,27 @@ class Server:
     def getdescendantPageIds(self, originId: int) -> set[int]:
         descendants = set()
         stack = [originId]
+        isFirst = True
         
         while stack:
             locationId = stack.pop()
             
             # ページが未周回なら
             if locationId not in descendants:
-                descendants.add(locationId)
+                if isFirst:
+                    isFirst = False
+                else:
+                    descendants.add(locationId)
                 
-                page = self.getPage(locationId)
+                children = self.hypertext.get(locationId)
+                
                 # ページが存在しないなら
-                if page is None:
+                if children is None:
                     continue
                 # ページが存在するなら
                 else:
-                    for child in page.destinationIds:
-                        if child not in descendants:  # この分岐は必須ではないが、ループ回数削減に寄与する
+                    for child in children:
+                        if child not in descendants:
                             stack.append(child)
         
         return descendants
