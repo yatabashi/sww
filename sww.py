@@ -1,30 +1,59 @@
 """
+Server.record と .hypertext はほとんど同じデータを保持している
+    record 生成       → record 更新 ↩️
+     ↪︎ hypertext 生成    ↪︎ hypertext 更新
+    Server と Web が統合された以上区別する意義はない？
+        従来の web を模すという目的は放棄されることになる
+            自動で更新されるので
+        存在しないページへのリンクをどう扱うか？
+        hyper-server な web を立てる
+
+出次数が0であることと「ページが存在しない」ことはどう区別されているか？
+    if   Server.getPage(id) is None
+    then continue
+    else destinationsは取得されるがループが回らない
+
+children?
+"""
+"""
+isDAG: 有向非巡回グラフであるか
+getCycle/hasCycle: サイクル検出（サイクルを成すページの集合）
+    isAcycle
+    finished でないが visited ならサイクルがある
+    単に visitied だけ見た場合？
+    https://drken1215.hatenablog.com/entry/2023/05/20/200517
+    https://qiita.com/maebaru/items/5b6cb981777624ab843c
+SCCs -> DAG: 縮約
+    これをもとに unilateral connectivity 判定
+    DAG が unilaterally connected なら元のグラフもそう
+    https://ja.wikipedia.org/wiki/%E3%83%88%E3%83%9D%E3%83%AD%E3%82%B8%E3%82%AB%E3%83%AB%E3%82%BD%E3%83%BC%E3%83%88#%E5%A4%96%E9%83%A8%E3%83%AA%E3%83%B3%E3%82%AF
+    https://stackoverflow.com/questions/64326998/omn-algorithm-to-check-if-a-directed-graph-is-unilaterally-connected
+
 2ページを与え縮約したグラフを返す: O(1)
     リンクを縮約するのが edge contraction → 隣接したページ
     二つのページを縮約するのが vertex identification/contraction → ページは隣接していなくてもいい
     https://en.wikipedia.org/wiki/Edge_contraction
-直径を取得する: O(n) ← 片側連結（任意の2頂点についてどちらかからどちらかに到達可能）でないと無意味そう
+推移簡約（到達可能性を保持しつつリンクを減らす）
+    https://ja.wikipedia.org/wiki/%E6%9C%89%E5%90%91%E9%9D%9E%E5%B7%A1%E5%9B%9E%E3%82%B0%E3%83%A9%E3%83%95
+直径を取得する: O(n) ← 片方向連結でないと無意味そう
+    片方向連結 = 任意の2頂点についてどちらかからどちらかに到達可能
+        → 任意の頂点に到達可能な頂点が存在する？？？？
+                http://x-n.io/doc/graph-theory-terms
+                https://www.geeksforgeeks.org/check-if-a-graph-is-strongly-unilaterally-or-weakly-connected/
     https://take44444.github.io/Algorithm-Book/graph/tree/diameter/main.html
     https://algo-logic.info/tree-diameter/
-ページを与え、それを削除し、それへのリンクも削除する: O(1)
+ページを与え、それを削除し、それへのリンクも削除する: O(1) ← Internet っぽくはない
     Server.deletePage() はリンクを削除しない
-ページを与え、次数（出入それぞれ）を取得する: O(n)
-    https://ja.wikipedia.org/wiki/%E6%AC%A1%E6%95%B0_(%E3%82%B0%E3%83%A9%E3%83%95%E7%90%86%E8%AB%96)
-出/入次数0の孤立点を取得する: O(n)
-    削除されたページをどう扱うか？
-ページを与え、そこから到達可能なページを取得する
-    探索するだけ
+入次数0の孤立点を取得する: O(n)
+    「孤立したページ」
 道の集合を与え、ハイパーテキストを生成する
     Server.makePagesFromHyperlinks() はエッジの集合を与える
     歩道Walk／路Trail（辺の重複なし）を与えたい
         walk から trail に変換することになりそう
         →これは別で用意したいか
     道Pathは頂点が重複しない→採用するならループは独立の要素としてあたえられなければならない
-強連結度
-サイクル検出
-    finished でないが visited ならサイクルがある
-    単に visitied だけ見た場合？
-    https://drken1215.hatenablog.com/entry/2023/05/20/200517
+点強連結度
+ランダムなグラフの生成
 
 ファイルシステム
     ハイパーテキスト：
@@ -40,18 +69,13 @@
     　・別のファイルを参照するファイルはありうる（シンボリックリンク／エイリアス）
     →原則として閉路は含まれない（ハードリンク等があれば可能）
 
-弱連結・片側連結
-    http://x-n.io/doc/graph-theory-terms
-    https://www.geeksforgeeks.org/check-if-a-graph-is-strongly-unilaterally-or-weakly-connected/
-
-ランダムなグラフの生成
-
-別サーバへのアクセス hyper-server?
+DAG → トポロジカルソート
 """
 """
 強連結成分分解：
     https://manabitimes.jp/math/1250
     https://hkawabata.github.io/technical-note/note/Algorithm/graph/scc.html
+    https://inzkyk.xyz/algorithms/depth_first_search/strong_connectivity/
 
 descendantsの取得：
     https://www.hongo.wide.ad.jp/~jo2lxq/dm/lecture/07.pdf
@@ -123,6 +147,7 @@ class Server:
         self.record.update({(page.id, page) for page in pages})
     
     # 指定したページをサーバから削除する
+    # 出次数を0にする
     def deletePage(self, *ids: int):
         for id in ids:
             self.record.pop(id, None)
@@ -165,9 +190,9 @@ class Server:
             if locationId not in hypertext:
                 hypertext[locationId] = copy.copy(page.destinationIds)
                 
-                for child in page.destinationIds:
-                    if child not in hypertext:
-                        stack.append(child)
+                for destinationId in page.destinationIds:
+                    if destinationId not in hypertext:
+                        stack.append(destinationId)
         
         self.hypertext = hypertext
     
@@ -242,6 +267,22 @@ class Server:
                 d[hyperlink[0]] = {hyperlink[1]}
         
         return d
+    
+    # 歩道の集合を辺の集合に変換する
+    @classmethod
+    def getEdgesFromWalks(cls, walks: set[tuple[int, ...]]) -> set[tuple[int, int]]:
+        edges: set[tuple[int, int]] = set()
+        
+        for walk in walks:
+            previous = None
+            
+            for pageId in walk:
+                if previous is not None:
+                    edges.add((previous, pageId))
+                    
+                previous = pageId
+        
+        return edges
     
     # 与えられたハイパーテキストからハイパーリンクを得る
     @classmethod
@@ -756,7 +797,7 @@ if __name__ == "__main__":
     print(len(server.getSccs_nonrec()), "SCCs (nonrec)")
     print("Descendants of 7:", server.getdescendantPageIds(7))
     print("12 to 1:", server.getDistance(12, 1), "links")
-    print("\n——————————\n")
+    print("\n———————————\n")
     
     """
        ~0~  8 ← 10
@@ -783,7 +824,7 @@ if __name__ == "__main__":
     print(len(server.getSccs_nonrec()), "SCCs (nonrec)")
     print("Descendants of 7:", server.getdescendantPageIds(7))
     print("12 to 0:", server.getDistance(12, 0), "links")
-    print("\n——————————\n")
+    print("\n———————————\n")
     
     """
        ~0~
@@ -805,7 +846,7 @@ if __name__ == "__main__":
     print(len(server.getSccs_nonrec()), "SCCs (nonrec)")
     print("Descendants of 7:", server.getdescendantPageIds(7))
     print("13 to 0:", server.getDistance(13, 0), "links")
-    print("\n——————————\n")
+    print("\n———————————\n")
     
     # web.explore()
     
@@ -833,7 +874,7 @@ if __name__ == "__main__":
     print(len(servera.getSccs_nonrec()), "SCCs (nonrec)")
     print("Descendants of 20:", servera.getdescendantPageIds(20))
     print("23 to 24:", servera.getDistance(23, 24), "links")
-    print("\n——————————\n")
+    print("\n———————————\n")
     
     """
     ⇩
@@ -848,6 +889,18 @@ if __name__ == "__main__":
     pagefou = Page(4, "", {2, 5})
     pagefiv = Page(5, "", {4})
     serverserv = Server({pageone, pagetwo, pagethr, pagefou, pagefiv})
+    serverserv.initialiseHypertext(1)
+    print("hypertext:", serverserv.getSortedHypertext())
+    print("hyperlinks:", serverserv.getSortedHyperlinks())
+    print(serverserv.getRoot(), "is a root")
+    print(serverserv.hypertextIsStronglyConnected(), "SCCs")
+    print(len(serverserv.getSccs_nonrec()), "SCCs (nonrec)")
+    print("Descendants of 5:", serverserv.getdescendantPageIds(5))
+    print("5 to 3:", serverserv.getDistance(5, 3), "links")
+    print("\n— — — — — —\n")
+    
+    edges = Server.getEdgesFromWalks({(1, 2, 3), (1, 4, 5, 4, 2)}); print(edges)
+    serverserv = Server(Server.makePagesFromHyperlinks(edges))
     serverserv.initialiseHypertext(1)
     print("hypertext:", serverserv.getSortedHypertext())
     print("hyperlinks:", serverserv.getSortedHyperlinks())
