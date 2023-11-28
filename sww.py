@@ -1,37 +1,17 @@
 """
-isDAG: 有向非巡回グラフであるか
-getCycle/hasCycle: サイクル検出（サイクルを成すページの集合）
-    isAcycle
-    finished でないが visited ならサイクルがある
-    単に visitied だけ見た場合？
-    https://drken1215.hatenablog.com/entry/2023/05/20/200517
-    https://qiita.com/maebaru/items/5b6cb981777624ab843c
-SCCs -> DAG: 縮約
-    これをもとに unilateral connectivity 判定
-    DAG が unilaterally connected なら元のグラフもそう
+constructHypertext を廃止（demostrate などとして残すのもあり）
+self.hypertextの参照が残っているので消す
+ハイパーリンクの正しさ（存在しないページへのリンクがないか）の検証
+
+pageId は IP アドレスのようなもの → URL を与える
+    content に似て非なるもの
+    URL から IP を引く機構
+
+片方向連結（SCC縮約がそうなら元のグラフもそう）→トポロジカルソート
     https://ja.wikipedia.org/wiki/%E3%83%88%E3%83%9D%E3%83%AD%E3%82%B8%E3%82%AB%E3%83%AB%E3%82%BD%E3%83%BC%E3%83%88#%E5%A4%96%E9%83%A8%E3%83%AA%E3%83%B3%E3%82%AF
     https://stackoverflow.com/questions/64326998/omn-algorithm-to-check-if-a-directed-graph-is-unilaterally-connected
-2ページを与え縮約したグラフを返す: O(1)
-    リンクを縮約するのが edge contraction → 隣接したページ
-    二つのページを縮約するのが vertex identification/contraction → ページは隣接していなくてもいい
-    https://en.wikipedia.org/wiki/Edge_contraction
 推移簡約（到達可能性を保持しつつリンクを減らす）
     https://ja.wikipedia.org/wiki/%E6%9C%89%E5%90%91%E9%9D%9E%E5%B7%A1%E5%9B%9E%E3%82%B0%E3%83%A9%E3%83%95
-直径を取得する: O(n) ← 片方向連結でないと無意味そう
-    片方向連結 = 任意の2頂点についてどちらかからどちらかに到達可能
-        → 任意の頂点に到達可能な頂点が存在する？？？？
-                http://x-n.io/doc/graph-theory-terms
-                https://www.geeksforgeeks.org/check-if-a-graph-is-strongly-unilaterally-or-weakly-connected/
-    https://take44444.github.io/Algorithm-Book/graph/tree/diameter/main.html
-    https://algo-logic.info/tree-diameter/
-入次数0の孤立点を取得する: O(n)
-    「孤立したページ」
-道の集合を与え、ハイパーテキストを生成する
-    Server.makePagesFromHyperlinks() はエッジの集合を与える
-    歩道Walk／路Trail（辺の重複なし）を与えたい
-        walk から trail に変換することになりそう
-        →これは別で用意したいか
-    道Pathは頂点が重複しない→採用するならループは独立の要素としてあたえられなければならない
 点強連結度
 ランダムなグラフの生成
 
@@ -40,7 +20,7 @@ SCCs -> DAG: 縮約
     ・ページからなる
     ・どのページからどのページにも飛べる
     →閉路を含みうる
-
+    
     ファイルシステム：
     ・ディレクトリとファイルからなる
     ・ディレクトリは親ディレクトリ、自分自身、子ディレクトリとファイルへのリンクを持つ
@@ -48,8 +28,6 @@ SCCs -> DAG: 縮約
     ・ファイルはリンクを持たない
     　・別のファイルを参照するファイルはありうる（シンボリックリンク／エイリアス）
     →原則として閉路は含まれない（ハードリンク等があれば可能）
-
-DAG → トポロジカルソート
 """
 """
 強連結成分分解：
@@ -86,6 +64,14 @@ def mergeSets(l: list[set]) -> set:
     for s in l:
         v |= s
     return v
+
+
+# リストに指定された要素が含まれればその index を、なければ -1 を返す
+def find(l: list, i: any) -> int:
+    if i in l:
+        return l.index(i)
+    else:
+        return -1
 
 
 # Webページに相当する
@@ -158,7 +144,7 @@ class Server:
                     constructed |= descendantHypertext
             
             return constructed
-
+    
         # 始点が指定されていない場合、全てのページから走査する
         if originId is None:
             leftPages = self.record.keys()
@@ -270,29 +256,6 @@ class Server:
                         stack.append(destination)
         
         return descendants
-    
-    # 根（リンクを辿って自分以外の全てのページに到達可能なページ）を一つ取得する
-    def getRoot(self):
-        """
-        0. ページ一覧を用意する
-        1. 0からひとつページを選ぶ
-        2. そこから走査する
-        3. 2の結果が record.keys に等しかったら 1 のページを返す
-           等しくなかったら
-            2 に現れたページを 0 から削除し、1に戻る
-        """
-        leftPageIds = self.record.keys()
-        
-        while leftPageIds:
-            locationId = getMember(leftPageIds)
-            descendants = self.getdescendantPageIds(locationId)
-            
-            if descendants == (self.record.keys() - {locationId}):
-                return locationId
-            else:
-                leftPageIds -= {locationId} | descendants
-        
-        return None
     
     # 始点と終点を指定し、その2ページ間の距離（到達に必要な最短のリンク数）を取得する
     def getDistance(self, startPageId: int, endPageId: int, printsDetails: bool = None):
@@ -616,11 +579,156 @@ class Server:
         
         return components
     
-    # 強結合成分の個数を取得する
-    def hypertextIsStronglyConnected(self) -> int:
+    # 強連結成分の個数を取得する
+    def countSCCs(self) -> int:
         return len(self.getSCCs())
     
+    # ハイパーテキストが強連結であるかどうかを返す
+    def isStronglyConnected(self) -> bool:
+        return self.countSCCs() == 1
+    
+    # ハイパーテキスト内のサイクル（closed path）を一つ返す
+    def findCycle(self, pageIds: set[int] = None, printsDetails: bool = None) -> Union[list[int], None]:
+        """
+        0 → 1 → 2 → 3
+        ↑       ↓   ↑
+        7 ← 8 ← 4 → 6
+        ↓   ↑
+        9 → 5
+        
+        0 [] →
+            1 [0] → 2
+            2 [0, 1] → 3, 4
+                3 [0, 1, 2] return [0, 1, 2]
+                4 [0, 1, 2] → 6, 8
+                    6 [0, 1, 2, 4] → 3
+                        3 [0, 1, 2, 4, 6] /
+                        /
+                    8 [0, 1, 2, 4] → 7
+                        7 [0, 1, 2, 4, 8] → 0, 9 ! '0124870'
+        """
+        if pageIds is None:
+            pageIds = self.record.keys()
+        
+        def f(locationId: int, path: int = None, deadEnds: set[int] = None, printsDetails: bool = None):
+            if path is None:
+                path = []
+            
+            if deadEnds is None:
+                deadEnds = set()
+            
+            # ページが未訪問なら
+            if (index := find(path, locationId)) == -1:
+                if printsDetails: print(locationId, path)
+                
+                if destinationIds := self.getPage(locationId).destinationIds:
+                    for destinationId in destinationIds:
+                        if printsDetails: print(locationId, "to", destinationId, "of", destinationIds)
+                        
+                        if destinationId not in deadEnds and (rvs := f(destinationId, path+[locationId], deadEnds, printsDetails=printsDetails))[0] is not None:
+                            if printsDetails: print("↩︎")
+                            return rvs
+                    
+                    deadEnds.add(locationId)
+                    
+                    if printsDetails: print("No cycle found↩︎")
+                    return (None, deadEnds)
+                else:
+                    deadEnds.add(locationId)
+                    
+                    if printsDetails: print("No Child↩︎")
+                    return (None, deadEnds)
+            else:
+                if printsDetails: print("Cycle found↩︎")
+                return (path[index:] + [locationId], deadEnds)
+        
+        # ある頂点から探索してサイクルが見つからなかったとき
+        if (rvs := f(getMember(pageIds), printsDetails=printsDetails))[0] is None:
+            # 経由した頂点を除いた残りの頂点があればサイクルを探索する
+            if (left := pageIds - rvs[1]):
+                return self.findCycle(left)
+            # 全ての頂点を訪れていればサイクルは存在しない
+            else:
+                return None
+        # サイクルが見つかったとき
+        else:
+            return rvs[0]
+        
+    # ハイパーテキスト内のサイクル（closed path）を一つ返す
+    def findCycle_nonrec(self) -> Union[list[int], None]:
+        # visited: set
+        # path: list
+        """
+        0 → 1 → 2 → 3
+        ↑       ↓   ↑
+        7 ← 8 ← 4 → 6
+        ↓   ↑
+        9 → 5
+        
+        普通に深さ優先探索？
+        1 → 2 → 4
+            ↓ ↖︎ ↓
+            3   5
+        https://drken1215.hatenablog.com/entry/2023/05/20/200517#chap1
+        stack; location; path; isvisited; haschild:ids
+        ; 1; 1; false; true:2
+        ; 2; 12; false; true:34
+        4; 3; 12; false; false
+        ; 4; 124; false; true:5
+        ; 5; 1245; false; true:2 -> '2452'
+        
+        
+        行き先がなければ pass
+        行き先が記法なら return
+        あれば append してすすむ
+        """
+        left = set(self.record.keys())
+        
+        while left:
+            stack = [getMember(left)]
+            path = []
+            
+            while stack:
+                locationId = stack.pop()
+                
+                # ページが未訪問なら
+                if (index := find(path, locationId)) == -1:
+                    left.discard(locationId)
+                    
+                    if destinationIds := self.getPage(locationId).destinationIds:
+                        stack += list(destinationIds)
+                        path.append(locationId)
+                    else:
+                        continue
+                else:
+                    return path[index:] + [locationId]
+        
+        return None
+    
+    def isDAG(self):
+        return self.findCycle() is None
+    
+    def contracted(self):
+        sccs = self.getSCCs()
+        rToIds = {min(scc): set(scc) for scc in sccs}
+        idToR = {id: r for r, ids in rToIds.items() for id in ids}
+        contraction = {key: set() for key in rToIds.keys()}
+        
+        for r, scc in rToIds.items():
+            for pageId in scc:
+                for destinationId in self.getPage(pageId).destinationIds:
+                    if destinationId not in scc:
+                        contraction[r] |= {idToR[destinationId]}
+        
+        return contraction
+    
+        
     # ——— クラスメソッド ———
+    
+    # ハイパーテキストを元にページ群を（新たに）生成する
+    @classmethod
+    def makePagesFromHypertext(cls, hypertext: dict[int, set[int]]) -> set[Type[Page]]:
+        return {Page(pageId, destinationIds) for pageId, destinationIds in hypertext.items()}
     
     # ハイパーリンクの集合を元にページ群を（新たに）生成する
     @classmethod
@@ -766,7 +874,7 @@ class Server:
 
 
 if __name__ == "__main__":
-    """
+    print("""
         0   8 ← 10
       ↙︎ ⇅     ↘︎ ↑
   ⇨ 1 → 2       9 → 11
@@ -774,23 +882,7 @@ if __name__ == "__main__":
     3 → 4 ← 5 ⇄ 12
       ↖︎ ↓ ↗︎ ↑
         7   6
-    
-        11  1 ← 2
-      ↙︎ ⇅     ↘︎ ↑
-  ⇨ 10→ 0       4   3
-    ↓ ↗︎ ↑   ∩
-    9 → 8 ← 6 ⇄ 5
-      ↖︎ ↓ ↗︎
-        7   12
-    
-        11  4 ← 5
-      ↙︎ ⇅     ↘︎ ↑
-  ⇨ 10→ 0       6   3
-    ↓ ↗︎ ↑   ∩
-    8 → 1 ← 2 ⇄ 7
-      ↖︎ ↓ ↗︎
-        9   12
-    """
+    """)
     
     server = Server({Page(0, {1, 2}),
                      Page(1, {2, 3}),
@@ -810,17 +902,21 @@ if __name__ == "__main__":
     print("hypertext (s, nr)  :", server.constructHypertext_nonrec())
     print("hyperlinks (s)     :", server.getSortedHyperlinks())
     print("Descendants of 7   :", server.getdescendantPageIds(7))
-    print("Root               :", server.getRoot())
     print("12 to 1            :", server.getDistance(12, 1), "links")
     print("13 to 12           :", server.getDistance(13, 12), "links")
     print("Start pages        :", server.getStartPages())
     print("End pages          :", server.getEndPages())
-    print(server.hypertextIsStronglyConnected(), "SCCs")
-    print(len(server.getSccs_nonrec()), "SCCs (nonrec)")
+    print("Sccs               :", server.countSCCs())
+    print("SCCs (nonrec)      :", len(server.getSccs_nonrec()))
+    print("Cycle              :", server.findCycle())
+    print("Cycle (nonrec)     :", server.findCycle_nonrec())
+    print("is DAG             :", server.isDAG())
+    print("SCC contraction    :", c := server.contracted())
+    print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
     
     print("\n———————————\n")
     
-    """
+    print("""
             8 ← 10
               ↘︎ ↑
     1 → 2       9 → 11
@@ -830,7 +926,7 @@ if __name__ == "__main__":
         7 → 6
             ↑
             13
-    """
+    """)
     
     server.deletePage(0)
     server.getPage(5).deleteLink(12)
@@ -841,17 +937,21 @@ if __name__ == "__main__":
     print("hypertext (s, nr)  :", server.constructHypertext_nonrec())
     print("hyperlinks (s)     :", server.getSortedHyperlinks())
     print("Descendants of 7   :", server.getdescendantPageIds(7))
-    print("Root               :", server.getRoot())
     print("12 to 1            :", server.getDistance(12, 1), "links")
     print("13 to 12           :", server.getDistance(13, 12), "links")
     print("Start pages        :", server.getStartPages())
     print("End pages          :", server.getEndPages())
-    print(server.hypertextIsStronglyConnected(), "SCCs")
-    print(len(server.getSccs_nonrec()), "SCCs (nonrec)")
+    print("Sccs               :", server.countSCCs())
+    print("SCCs (nonrec)      :", len(server.getSccs_nonrec()))
+    print("Cycle              :", server.findCycle())
+    print("Cycle (nonrec)     :", server.findCycle_nonrec())
+    print("is DAG             :", server.isDAG())
+    print("SCC contraction    :", c := server.contracted())
+    print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
     
     print("\n———————————\n")
     
-    """
+    print("""
    (1)→ 2       ...
     ↓ ↗︎ ↑   ∩   ↑
     3 → 4 ← 5 ←(12)
@@ -859,95 +959,193 @@ if __name__ == "__main__":
         7 → 6
             ↑
             13⇦
-    """
+    """)
     
     server.constructHypertext(13)
     print("hypertext (s)      :", server.getSortedHypertext())
     print("hypertext (s, nr)  :", server.constructHypertext_nonrec(13))
     print("hyperlinks (s)     :", server.getSortedHyperlinks())
     print("Descendants of 7   :", server.getdescendantPageIds(7))
-    print("Root               :", server.getRoot())
     print("13 to 1            :", server.getDistance(13, 1), "links")
     print("13 to 12           :", server.getDistance(13, 12), "links")
     print("Start pages        :", server.getStartPages())
     print("End pages          :", server.getEndPages())
-    print(server.hypertextIsStronglyConnected(), "SCCs")
-    print(len(server.getSccs_nonrec()), "SCCs (nonrec)")
+    print("Sccs               :", server.countSCCs())
+    print("SCCs (nonrec)      :", len(server.getSccs_nonrec()))
+    print("Cycle              :", server.findCycle())
+    print("Cycle (nonrec)     :", server.findCycle_nonrec())
+    print("is DAG             :", server.isDAG())
+    print("SCC contraction    :", c := server.contracted())
+    print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
     
     print("\n———————————\n")
     
-    """
+    print("""
     ⇩
     0 → 1 → 2 → 4
         ↑ ↙︎
         3
-    """
+    """)
     
-    servera = Server({Page(20, {21}),
+    server1 = Server({Page(20, {21}),
                       Page(21, {22}),
                       Page(22, {23, 24}),
                       Page(23, {21}),
                       Page(24, set())})
-    servera.constructHypertext(20)
-    print("hypertext (s)      :", servera.getSortedHypertext())
-    print("hypertext (s, nr)  :", servera.constructHypertext_nonrec(20))
-    print("hyperlinks (s)     :", servera.getSortedHyperlinks())
-    print("Descendants of 21  :", servera.getdescendantPageIds(21))
-    print("Root               :", servera.getRoot())
-    print("23 to 24           :", servera.getDistance(23, 24), "links")
-    print("Start pages        :", servera.getStartPages())
-    print("End pages          :", servera.getEndPages())
-    print(servera.hypertextIsStronglyConnected(), "SCCs")
-    print(len(servera.getSccs_nonrec()), "SCCs (nonrec)")
+    server1.constructHypertext(20)
+    print("hypertext (s)      :", server1.getSortedHypertext())
+    print("hypertext (s, nr)  :", server1.constructHypertext_nonrec(20))
+    print("hyperlinks (s)     :", server1.getSortedHyperlinks())
+    print("Descendants of 21  :", server1.getdescendantPageIds(21))
+    print("23 to 24           :", server1.getDistance(23, 24), "links")
+    print("Start pages        :", server1.getStartPages())
+    print("End pages          :", server1.getEndPages())
+    print("Sccs               :", server1.countSCCs())
+    print("SCCs (nonrec)      :", len(server1.getSccs_nonrec()))
+    print("Cycle              :", server1.findCycle())
+    print("Cycle (nonrec)     :", server1.findCycle_nonrec())
+    print("is DAG             :", server1.isDAG())
+    print("SCC contraction    :", c := server1.contracted())
+    print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
     
     print("\n———————————\n")
     
-    """
+    print("""
     ⇩
     1 → 2 → 3
       ↘︎ ↑
         4 ⇄ 5
-    """
+    """)
     
-    serverserv = Server({Page(1, {2, 4}),
+    server2 = Server({Page(1, {2, 4}),
                          Page(2, {3}),
                          Page(3, set()),
                          Page(4, {2, 5}),
                          Page(5, {4})})
-    serverserv.constructHypertext(1)
-    print("hypertext (s)      :", serverserv.getSortedHypertext())
-    print("hypertext (s, nr)  :", serverserv.constructHypertext_nonrec(1))
-    print("hyperlinks (s)     :", serverserv.getSortedHyperlinks())
-    print("Descendants of 5   :", serverserv.getdescendantPageIds(5))
-    print("Root               :", serverserv.getRoot())
-    print("5 to 3             :", serverserv.getDistance(5, 3), "links")
-    print("Start pages        :", serverserv.getStartPages())
-    print("End pages          :", serverserv.getEndPages())
-    print(serverserv.hypertextIsStronglyConnected(), "SCCs")
-    print(len(serverserv.getSccs_nonrec()), "SCCs (nonrec)")
+    server2.constructHypertext(1)
+    print("hypertext (s)      :", server2.getSortedHypertext())
+    print("hypertext (s, nr)  :", server2.constructHypertext_nonrec(1))
+    print("hyperlinks (s)     :", server2.getSortedHyperlinks())
+    print("Descendants of 5   :", server2.getdescendantPageIds(5))
+    print("5 to 3             :", server2.getDistance(5, 3), "links")
+    print("Start pages        :", server2.getStartPages())
+    print("End pages          :", server2.getEndPages())
+    print("Sccs               :", server2.countSCCs())
+    print("SCCs (nonrec)      :", len(server2.getSccs_nonrec()))
+    print("Cycle              :", server2.findCycle())
+    print("Cycle (nonrec)     :", server2.findCycle_nonrec())
+    print("is DAG             :", server2.isDAG())
+    print("SCC contraction    :", c := server2.contracted())
+    print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
     
     print("\n— — — — — —\n")
     
-    print("class methods")
-    edges = Server.splitWalksIntoEdges({(1, 2, 3), (1, 4, 5, 4, 2)}); print("edges:", edges)
-    serverserv = Server(Server.makePagesFromHyperlinks(edges))
-    serverserv.constructHypertext(1)
-    print("hypertext (s)      :", serverserv.getSortedHypertext())
-    print("hypertext (s, nr)  :", serverserv.constructHypertext_nonrec(1))
-    print("hyperlinks (s)     :", serverserv.getSortedHyperlinks())
-    print("Descendants of 5   :", serverserv.getdescendantPageIds(5))
-    print("Root               :", serverserv.getRoot())
-    print("5 to 3             :", serverserv.getDistance(5, 3), "links")
-    print("Start pages        :", serverserv.getStartPages())
-    print("End pages          :", serverserv.getEndPages())
-    print(serverserv.hypertextIsStronglyConnected(), "SCCs")
-    print(len(serverserv.getSccs_nonrec()), "SCCs (nonrec)")
+    edges = Server.splitWalksIntoEdges({(1, 2, 3), (1, 4, 5, 4, 2)})
+    server2 = Server(Server.makePagesFromHyperlinks(edges))
+    server2.constructHypertext(1)
+    print("hypertext (s)      :", server2.getSortedHypertext())
+    print("hypertext (s, nr)  :", server2.constructHypertext_nonrec(1))
+    print("hyperlinks (s)     :", server2.getSortedHyperlinks())
+    print("Descendants of 5   :", server2.getdescendantPageIds(5))
+    print("5 to 3             :", server2.getDistance(5, 3), "links")
+    print("Start pages        :", server2.getStartPages())
+    print("End pages          :", server2.getEndPages())
+    print("Sccs               :", server2.countSCCs())
+    print("SCCs (nonrec)      :", len(server2.getSccs_nonrec()))
+    print("Cycle              :", server2.findCycle())
+    print("Cycle (nonrec)     :", server2.findCycle_nonrec())
+    print("is DAG             :", server2.isDAG())
+    print("SCC contraction    :", c := server2.contracted())
+    print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
     
     print("\n———————————\n")
     
-    for _ in range(10):
-        server.randomwalk(12, 3, 14)
+    print("""
+        2
+        ↑ ↖︎
+    1 ← 0 → 6
+    ∪   ↓ /
+        5
+    """)
+    
+    server3 = Server({Page(0, {1, 2, 5, 6}),
+                      Page(1, {1}),
+                      Page(2, set()),
+                      Page(5, {6}),
+                      Page(6, {2, 5})})
+    server3.constructHypertext(0)
+    print("hypertext (s)      :", server3.getSortedHypertext())
+    print("hypertext (s, nr)  :", server3.constructHypertext_nonrec(0))
+    print("hyperlinks (s)     :", server3.getSortedHyperlinks())
+    print("Descendants of 5   :", server3.getdescendantPageIds(5))
+    print("5 to 1             :", server3.getDistance(5, 1), "links")
+    print("Start pages        :", server3.getStartPages())
+    print("End pages          :", server3.getEndPages())
+    print("Sccs               :", server3.countSCCs())
+    print("SCCs (nonrec)      :", len(server3.getSccs_nonrec()))
+    print("Cycle              :", server3.findCycle())
+    print("Cycle (nonrec)     :", server3.findCycle_nonrec())
+    print("is DAG             :", server3.isDAG())
+    print("SCC contraction    :", c := server3.contracted())
+    print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
     
     print("\n———————————\n")
     
-    server.explore()
+    print("""
+    0 → 1 → 2 → 3
+    ↑       ↓   ↑
+    7 ← 8 ← 4 → 6
+    ↓   ↑
+    9 → 5
+    """)
+    
+    edges4 = Server.splitWalksIntoEdges({(0, 1, 2, 3), (2, 4, 6, 3), (4, 8, 7, 0), (7, 9, 5, 8)})
+    server4 = Server(Server.makePagesFromHyperlinks(edges4))
+    server4.constructHypertext(0)
+    print("hypertext (s)      :", server4.getSortedHypertext())
+    print("hypertext (s, nr)  :", server4.constructHypertext_nonrec(0))
+    print("hyperlinks (s)     :", server4.getSortedHyperlinks())
+    print("Descendants of 5   :", server4.getdescendantPageIds(5))
+    print("5 to 1             :", server4.getDistance(5, 1), "links")
+    print("Start pages        :", server4.getStartPages())
+    print("End pages          :", server4.getEndPages())
+    print("Sccs               :", server4.countSCCs())
+    print("SCCs (nonrec)      :", len(server4.getSccs_nonrec()))
+    print("Cycle              :", server4.findCycle())
+    print("Cycle (nonrec)     :", server4.findCycle_nonrec())
+    print("is DAG             :", server4.isDAG())
+    print("SCC contraction    :", c := server4.contracted())
+    print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
+    
+    print("\n———————————\n")
+    
+    print("""
+    0 → 1 → 2 → 3
+            ↓
+            4
+    """)
+    
+    edges5 = Server.splitWalksIntoEdges({(0, 1, 2, 3), (2, 4)})
+    server5 = Server(Server.makePagesFromHyperlinks(edges5))
+    server5.constructHypertext(0)
+    print("hypertext (s)      :", server5.getSortedHypertext())
+    print("hypertext (s, nr)  :", server5.constructHypertext_nonrec(0))
+    print("hyperlinks (s)     :", server5.getSortedHyperlinks())
+    print("Descendants of 3   :", server5.getdescendantPageIds(3))
+    print("3 to 1             :", server5.getDistance(3, 1), "links")
+    print("Start pages        :", server5.getStartPages())
+    print("End pages          :", server5.getEndPages())
+    print("Sccs               :", server5.countSCCs())
+    print("SCCs (nonrec)      :", len(server5.getSccs_nonrec()))
+    print("Cycle              :", server5.findCycle())
+    print("Cycle (nonrec)     :", server5.findCycle_nonrec())
+    print("is DAG             :", server5.isDAG())
+    print("SCC contraction    :", c := server5.contracted())
+    print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
+    
+    # for _ in range(10):
+    #     server.randomwalk(12, 3, 14)
+    
+    # print("\n———————————\n")
+    
+    # server.explore()
