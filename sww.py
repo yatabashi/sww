@@ -2,14 +2,12 @@
 pageId は IP アドレスのようなもの → URL を与える
     content に似て非なるもの
     URL から IP を引く機構
-
-片方向連結（SCC縮約がそうなら元のグラフもそう）→トポロジカルソート
-    https://ja.wikipedia.org/wiki/%E3%83%88%E3%83%9D%E3%83%AD%E3%82%B8%E3%82%AB%E3%83%AB%E3%82%BD%E3%83%BC%E3%83%88#%E5%A4%96%E9%83%A8%E3%83%AA%E3%83%B3%E3%82%AF
-    https://stackoverflow.com/questions/64326998/omn-algorithm-to-check-if-a-directed-graph-is-unilaterally-connected
-推移簡約（到達可能性を保持しつつリンクを減らす）
-    https://ja.wikipedia.org/wiki/%E6%9C%89%E5%90%91%E9%9D%9E%E5%B7%A1%E5%9B%9E%E3%82%B0%E3%83%A9%E3%83%95
 点強連結度
 ランダムなグラフの生成
+
+トポロジカルソート ← 片方向連結（SCC縮約がそうなら元のグラフもそう）
+    https://ja.wikipedia.org/wiki/%E3%83%88%E3%83%9D%E3%83%AD%E3%82%B8%E3%82%AB%E3%83%AB%E3%82%BD%E3%83%BC%E3%83%88#%E5%A4%96%E9%83%A8%E3%83%AA%E3%83%B3%E3%82%AF
+    https://stackoverflow.com/questions/64326998/omn-algorithm-to-check-if-a-directed-graph-is-unilaterally-connected
 
 ファイルシステム
     ハイパーテキスト：
@@ -24,15 +22,6 @@ pageId は IP アドレスのようなもの → URL を与える
     ・ファイルはリンクを持たない
     　・別のファイルを参照するファイルはありうる（シンボリックリンク／エイリアス）
     →原則として閉路は含まれない（ハードリンク等があれば可能）
-"""
-"""
-強連結成分分解：
-    https://manabitimes.jp/math/1250
-    https://hkawabata.github.io/technical-note/note/Algorithm/graph/scc.html
-    https://inzkyk.xyz/algorithms/depth_first_search/strong_connectivity/
-
-descendantsの取得：
-    https://www.hongo.wide.ad.jp/~jo2lxq/dm/lecture/07.pdf
 """
 
 
@@ -117,10 +106,7 @@ class Server:
             for page in self.record.values():
                 page.deleteLink(id)
     
-    # ——— ハイパーテキストの情報取得 ———
-    
-    def getPageIds(self):
-        return self.record.keys()
+    # ——— ハイパーテキストの生成 ———
     
     def getHypertext(self):
         return {pageId: page.destinationIds for (pageId, page) in self.record.items()}
@@ -148,30 +134,6 @@ class Server:
         transposeHypertext |= {pageId: set() for pageId in pageIdsWithoutInEdge}
         
         return transposeHypertext
-    
-    # 与えられたハイパーテキストからハイパーリンクを得る
-    def getHyperlinks(self) -> set[tuple[int, int]]:
-        hypertext = self.getHypertext()
-        
-        s = set()
-        
-        # ハイパーリンクをタプルに変換する
-        for (startId, endIds) in hypertext.items():
-            s.update({(startId, endId) for endId in endIds})
-        
-        return s
-    
-    # ハイパーテキスト内の全リンクをソートして返す
-    def getSortedHyperlinks(self) -> set[tuple[int, int]]:
-        return sorted(list(self.getHyperlinks()))
-    
-    def getStartPageIds(self):
-        return {pageId for (pageId, destinationIds) in self.getHypertext().items() if destinationIds}
-    
-    def getEndPageIds(self):
-        return {pageId for (pageId, destinationIds) in self.getTransposeHypertext().items() if destinationIds}
-    
-    # ——— ハイパーテキストの利用 ———
     
     # ハイパーテキストを構築する
     def getInducedSubgraph(self, originId: int = None, constructed: dict[int, set[int]] = None) -> dict[int, set[int]]:
@@ -239,6 +201,89 @@ class Server:
                     stack = [getMember(leftPageIds)]
         
         return hypertext
+    
+    def SCCcontracted(self):
+        sccs = self.getSCCs()
+        rToIds = {min(scc): set(scc) for scc in sccs}
+        idToR = {id: r for r, ids in rToIds.items() for id in ids}
+        contraction = {key: set() for key in rToIds.keys()}
+        
+        for r, scc in rToIds.items():
+            for pageId in scc:
+                for destinationId in self.getPage(pageId).destinationIds:
+                    if destinationId not in scc:
+                        contraction[r] |= {idToR[destinationId]}
+        
+        return contraction
+    
+    # 推移簡約
+    def transitiveReduction(self):
+        """
+        getdescendants と同様に巡回するが、二度目に訪れた時にそのページを記録し、元ページからそのページへのリンクを削除する
+
+        各頂点の各リンクについて、そのリンクを通らずにリンク先に到達可能な場合、そのリンクを削除していく
+        """
+        tmpServer = copy.deepcopy(self)
+        deletion = set()
+        
+        for startId in tmpServer.getPageIds():
+            children = copy.copy(tmpServer.getPage(startId).destinationIds)
+            
+            if len(children) < 2:
+                continue
+            
+            for endId in children:
+                visited = {startId}
+                stack = [child for child in children - {endId}]
+                
+                while stack:
+                    locationId = stack.pop()
+                    escapeFlag = False
+                    
+                    # ページが未周回なら
+                    if locationId not in visited:
+                        visited.add(locationId)
+                        
+                        for destinationId in tmpServer.getPage(locationId).destinationIds:
+                            if destinationId == endId:
+                                deletion.add((startId, endId))
+                                tmpServer.getPage(startId).deleteLink(endId)
+                                
+                                escapeFlag = True
+                                break
+                            elif destinationId not in visited:
+                                stack.append(destinationId)
+                    
+                    if escapeFlag:
+                        break
+        return deletion
+    
+    # ——— ハイパーテキストの情報取得 ———
+    
+    def getPageIds(self):
+        return self.record.keys()
+    
+    # 与えられたハイパーテキストからハイパーリンクを得る
+    def getHyperlinks(self) -> set[tuple[int, int]]:
+        hypertext = self.getHypertext()
+        
+        s = set()
+        
+        # ハイパーリンクをタプルに変換する
+        for (startId, endIds) in hypertext.items():
+            s.update({(startId, endId) for endId in endIds})
+        
+        return s
+    
+    # ハイパーテキスト内の全リンクをソートして返す
+    def getSortedHyperlinks(self) -> set[tuple[int, int]]:
+        return sorted(list(self.getHyperlinks()))
+    
+    def getStartPageIds(self):
+        return {pageId for (pageId, destinationIds) in self.getHypertext().items() if destinationIds}
+    
+    def getEndPageIds(self):
+        return {pageId for (pageId, destinationIds) in self.getTransposeHypertext().items() if destinationIds}
     
     # 指定したページから到達可能なページのリストを取得する
     def getdescendantPageIds(self, originId: int) -> set[int]:
@@ -588,20 +633,6 @@ class Server:
     def isStronglyConnected(self) -> bool:
         return self.countSCCs() == 1
     
-    def SCCcontracted(self):
-        sccs = self.getSCCs()
-        rToIds = {min(scc): set(scc) for scc in sccs}
-        idToR = {id: r for r, ids in rToIds.items() for id in ids}
-        contraction = {key: set() for key in rToIds.keys()}
-        
-        for r, scc in rToIds.items():
-            for pageId in scc:
-                for destinationId in self.getPage(pageId).destinationIds:
-                    if destinationId not in scc:
-                        contraction[r] |= {idToR[destinationId]}
-        
-        return contraction
-    
     # ハイパーテキスト内のサイクル（closed path）を一つ返す
     def findCycle(self, pageIds: set[int] = None, printsDetails: bool = None) -> Union[list[int], None]:
         """
@@ -724,7 +755,6 @@ class Server:
         return self.findCycle() is None
     
     def existsLinkTo404Page(self) -> bool:
-        print(mergeSets((hypertext := self.getHypertext()).values()), self.getPageIds())
         return bool(mergeSets((hypertext := self.getHypertext()).values()) - self.getPageIds())
     
     # ——— クラスメソッド ———
@@ -886,6 +916,14 @@ if __name__ == "__main__":
     3 → 4 ← 5 ⇄ 12
       ↖︎ ↓ ↗︎ ↑
         7   6
+    
+        0   8 ← 10
+      ↙︎ ↑     ↘︎ ↑
+  ⇨ 1   2       9 → 11
+    ↓ ↗︎         ↑
+    3 → 4 ← 5 ⇄ 12
+      ↖︎ ↓ ↗︎ ↑
+        7   6
     """)
     
     server = Server({Page(0, {1, 2}),
@@ -916,6 +954,7 @@ if __name__ == "__main__":
     print("SCC contraction    :", c := server.SCCcontracted())
     print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
     print("soundness          :", not server.existsLinkTo404Page())
+    print("transitif reduction:", server.transitiveReduction())
     
     print("\n———————————\n")
     
@@ -926,6 +965,16 @@ if __name__ == "__main__":
     ↓ ↗︎ ↑   ∩   ↑
     3 → 4 ← 5 ← 12
       ↖︎ ↓ ↗︎ ↑
+        7 → 6
+            ↑
+            13
+    
+            8 ← 10
+              ↘︎ ↑
+    1   2       9 → 11
+    ↓ ↗︎         ↑
+    3 → 4 ← 5 ← 12
+      ↖︎ ↓   ↑
         7 → 6
             ↑
             13
@@ -950,6 +999,7 @@ if __name__ == "__main__":
     print("SCC contraction    :", c := server.SCCcontracted())
     print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
     print("soundness          :", not server.existsLinkTo404Page())
+    print("transitif reduction:", server.transitiveReduction())
     
     print("\n———————————\n")
     
@@ -958,6 +1008,14 @@ if __name__ == "__main__":
     ↓ ↗︎ ↑   ∩   ↑
     3 → 4 ← 5 ←(12)
       ↖︎ ↓ ↗︎ ↑
+        7 → 6
+            ↑
+            13⇦
+    
+        2
+        ↑    
+    3 → 4 ← 5
+      ↖︎ ↓   ↑
         7 → 6
             ↑
             13⇦
@@ -979,6 +1037,7 @@ if __name__ == "__main__":
     print("SCC contraction    :", c := server_.SCCcontracted())
     print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
     print("soundness          :", not server_.existsLinkTo404Page())
+    print("transitif reduction:", server_.transitiveReduction())
     
     print("\n———————————\n")
     
@@ -1008,12 +1067,18 @@ if __name__ == "__main__":
     print("SCC contraction    :", c := server1.SCCcontracted())
     print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
     print("soundness          :", not server1.existsLinkTo404Page())
+    print("transitif reduction:", server1.transitiveReduction())
     
     print("\n———————————\n")
     
     print("""
     ⇩
     1 → 2 → 3
+      ↘︎ ↑
+        4 ⇄ 5
+          
+    ⇩
+    1   2 → 3
       ↘︎ ↑
         4 ⇄ 5
     """)
@@ -1037,11 +1102,18 @@ if __name__ == "__main__":
     print("SCC contraction    :", c := server2.SCCcontracted())
     print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
     print("soundness          :", not server2.existsLinkTo404Page())
+    print("transitif reduction:", server2.transitiveReduction())
     
     print("\n———————————\n")
     
     print("""
     0 → 1 → 2 → 3
+    ↑       ↓   ↑
+    7 ← 8 ← 4 → 6
+    ↓   ↑
+    9 → 5
+          
+    0 → 1 → 2   3
     ↑       ↓   ↑
     7 ← 8 ← 4 → 6
     ↓   ↑
@@ -1064,6 +1136,7 @@ if __name__ == "__main__":
     print("SCC contraction    :", c := server4.SCCcontracted())
     print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
     print("soundness          :", not server4.existsLinkTo404Page())
+    print("transitif reduction:", server4.transitiveReduction())
     
     print("\n———————————\n")
     
@@ -1089,6 +1162,7 @@ if __name__ == "__main__":
     print("SCC contraction    :", c := server5.SCCcontracted())
     print("contraction is DAG :", Server(Server.makePagesFromHypertext(c)).isDAG())
     print("soundness          :", not server5.existsLinkTo404Page())
+    print("transitif reduction:", server5.transitiveReduction())
     
     print("\n———————————\n")
     
@@ -1102,6 +1176,9 @@ if __name__ == "__main__":
                       Page(1, set())})
     print("hypertext          :", server6.getSortedHypertext())
     print("soundness          :", not server6.existsLinkTo404Page())
+    print("transitif reduction:", server6.transitiveReduction())
+    
+    print("\n———————————\n")
     
     # for _ in range(10):
     #     server.randomwalk(12, 3, 14)
